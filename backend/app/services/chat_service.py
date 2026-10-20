@@ -30,6 +30,7 @@ from app.repositories.messages import MessageRepository, StoredMessage
 from app.repositories.users import UserRepository
 from app.schemas.conversation import (
     AddMembersRequest,
+    ConversationKeyOut,
     ConversationOut,
     CreateConversationRequest,
     GrantKeysRequest,
@@ -37,6 +38,7 @@ from app.schemas.conversation import (
     MemberOut,
     RemoveMemberRequest,
     RotateKeyRequest,
+    UpdateGroupRequest,
 )
 from app.services.common import decode_cursor, encode_cursor
 
@@ -47,12 +49,17 @@ def view_to_out(view: ConversationView) -> ConversationOut:
         id=c.id,
         type=c.type.value,
         name=c.name,
+        group_icon=c.group_icon,
         current_key_version=c.current_key_version,
         rotation_required=c.rotation_required,
         created_at=c.created_at,
         members=[
             MemberOut(user_id=uid, role=role.value, display_name=name, management_verified=verified)
             for uid, role, name, verified in view.members
+        ],
+        keys=[
+            ConversationKeyOut(key_version=version, wrapped_key=wrapped, wrapper_pub=wrapper)
+            for version, wrapped, wrapper in view.keys
         ],
         my_role=view.my_role.value if view.my_role else None,
         has_current_key=view.has_current_key,
@@ -198,6 +205,36 @@ class ChatService:
         if not views:
             raise NotFound("Conversation not found", code="CONVERSATION_NOT_FOUND")
         return view_to_out(views[0])
+
+    async def update_group(self, actor: User, cid: uuid.UUID, req: UpdateGroupRequest) -> ConversationOut:
+        conv = await self._locked_conversation(cid, actor, owner_only=True)
+        if conv.type != ConversationType.GROUP:
+            raise Conflict("Only groups can be edited", code="NOT_A_GROUP")
+        if "name" in req.model_fields_set:
+            conv.name = req.name
+        if "group_icon" in req.model_fields_set:
+            conv.group_icon = req.group_icon
+        members = await self.convs.member_ids(cid)
+        self.audit.add("conversation.group_update", actor_id=actor.id, target_id=cid)
+        await self.session.commit()
+        await self._notify(
+            [member_id for member_id in members if member_id != actor.id],
+            {"t": "conversation.updated", "conversationId": str(cid)},
+        )
+        return await self.get_for_user(actor, cid)
+
+    async def delete_group(self, actor: User, cid: uuid.UUID) -> None:
+        conv = await self._locked_conversation(cid, actor, owner_only=True)
+        if conv.type != ConversationType.GROUP:
+            raise Conflict("Only groups can be deleted", code="NOT_A_GROUP")
+        members = await self.convs.member_ids(cid)
+        await self.convs.delete(cid)
+        self.audit.add("conversation.group_delete", actor_id=actor.id, target_id=cid)
+        await self.session.commit()
+        await self._notify(
+            [member_id for member_id in members if member_id != actor.id],
+            {"t": "conversation.deleted", "conversationId": str(cid)},
+        )
 
     async def my_keys(self, user: User, cid: uuid.UUID) -> list[ConversationKey]:
         await self._require_member(cid, user)

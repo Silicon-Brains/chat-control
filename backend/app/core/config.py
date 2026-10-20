@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     ws_max_connections_per_user: int = 5
     ws_send_queue_size: int = 256
     ws_idle_timeout_seconds: int = 90
-    ws_max_frame_bytes: int = 16_384
+    ws_max_frame_bytes: int = 384 * 1024
     ws_rate_limit_messages: int = 20
     ws_rate_limit_window_seconds: int = 10
 

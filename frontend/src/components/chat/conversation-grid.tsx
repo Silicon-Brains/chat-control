@@ -10,6 +10,7 @@ import { useConversations } from '@/hooks/use-conversations';
 import { conversationTitle } from '@/lib/chat/helpers';
 import { formatRelative } from '@/lib/utils';
 import { useSession } from '@/stores/session';
+import { GroupActions } from './group-actions';
 
 export function ConversationGrid({ type }: { type: 'group' | 'broadcast' }) {
   const me = useSession((s) => s.user)!;
@@ -33,16 +34,19 @@ export function ConversationGrid({ type }: { type: 'group' | 'broadcast' }) {
         const title = conversationTitle(c, me.id);
         return (
           <li key={c.id}>
-            <Link href={`/chats/${c.id}`} className="glass block p-5 transition hover:-translate-y-0.5 hover:shadow-lift">
-              <div className="flex items-center gap-3">
-                <Avatar name={title} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-ink-900">{title}</p>
-                  <p className="text-xs">{c.members.length} members · {formatRelative(c.lastMessageAt)}</p>
+            <div className="glass flex items-center gap-2 p-5 transition hover:-translate-y-0.5 hover:shadow-lift">
+              <Link href={`/chats/${c.id}`} className="min-w-0 flex-1">
+                <div className="flex items-center gap-3">
+                  <Avatar name={title} icon={c.type === 'group' ? c.groupIcon : null} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold text-ink-900">{title}</p>
+                    <p className="text-xs">{c.members.length} members · {formatRelative(c.lastMessageAt)}</p>
+                  </div>
+                  {c.unreadCount > 0 && <Badge tone="solid">{c.unreadCount}</Badge>}
                 </div>
-                {c.unreadCount > 0 && <Badge tone="solid">{c.unreadCount}</Badge>}
-              </div>
-            </Link>
+              </Link>
+              {c.type === 'group' && c.myRole === 'owner' && <GroupActions conversation={c} />}
+            </div>
           </li>
         );
       })}

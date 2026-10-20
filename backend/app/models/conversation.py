@@ -37,6 +37,7 @@ class Conversation(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid7)
     type: Mapped[ConversationType] = mapped_column(pg_enum(ConversationType, "conversation_type"), nullable=False)
     name: Mapped[str | None] = mapped_column(String(100))
+    group_icon: Mapped[str | None] = mapped_column(String(16))
     direct_pair_key: Mapped[str | None] = mapped_column(String(73), unique=True)
     current_key_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     rotation_required: Mapped[bool] = mapped_column(

@@ -29,6 +29,7 @@ Clerk ── webhooks (user.created/updated/deleted, Svix-signed) ── instant
 ```
 * **No passwords, login codes, TOTP secrets, refresh tokens or session cookies** are managed by this API - Clerk owns sign-in, MFA and sessions.
 * **Self-service sign-up with approval**: users create Clerk accounts directly and verify their email. Accounts without a server-assigned role are mirrored as `pending`; all protected REST and WebSocket access returns `403 APPROVAL_PENDING` until an admin approves them.
+* **Voice notes** are recorded and AES-GCM-encrypted in the browser. The server stores opaque ciphertext only; clips are limited to 30 seconds / 160 KiB and expire with messages after 10 hours.
 * **Approval**: `POST /admin/users/{id}/approve` sets the Clerk `public_metadata.role = "user"`, activates the local account and writes an audit record. The client cannot set this role.
 * Admin invitations remain optional; invitations created by this API are stamped with `public_metadata.role = "user"` and are therefore approved on registration.
 * **Admins** are Clerk users with `public_metadata.role = "admin"`. Admin endpoints re-verify role/ban against Clerk when the mirror is >60 s old.
@@ -90,7 +91,7 @@ Close codes: 4401 bad/used ticket · 4403 account disabled · 4408 idle · 4429 
 * Send `Authorization: Bearer ${await getToken()}` on every call (Clerk React/Next: `useAuth().getToken()`).
 * First authenticated call provisions the user; `GET /users/me` → `hasPublicKey:false` means run key setup (`PUT /users/me/key`, base64 SPKI ECDH P-256, generated with WebCrypto, private key non-extractable in IndexedDB).
 * A *different* key is refused (409). Lost device ⇒ an admin runs **reset-key**; the user enrols again and rejoins conversations.
-* Crypto rules unchanged: AES-GCM, 12-byte nonce, AAD = conversationId‖senderId‖keyVersion, ciphertext 16-8192 bytes; every member needs a wrapped key on create/add/rotate; stale `keyVersion` ⇒ `KEY_VERSION_STALE`.
+* Crypto: AES-GCM, 12-byte nonce, AAD = conversationId‖senderId‖keyVersion, ciphertext 16-262144 bytes; message migration `0005` expands the DB check and WebSocket frame limit for encrypted voice notes. Every member needs a wrapped key on create/add/rotate; stale `keyVersion` ⇒ `KEY_VERSION_STALE`.
 
 ## Security design (as implemented)
 * **Tokens**: RS256 only, signature + issuer + expiry/nbf verified; `azp` must be an allowed origin; pending sessions rejected; `alg=none`/HS256 confusion tests included. JWKS cached 1 h (`503 AUTH_UNAVAILABLE` if Clerk is unreachable and no key is cached).

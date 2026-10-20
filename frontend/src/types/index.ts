@@ -74,6 +74,7 @@ export interface Conversation {
   id: string;
   type: ConversationType;
   name: string | null;
+  groupIcon: string | null;
   currentKeyVersion: number;
   members: ConversationMember[];
   /** This user's wrapped keys, all live versions. */
@@ -117,6 +118,7 @@ export interface Page<T> {
 export type ServerEvent =
   | ({ t: 'message.new' } & EncryptedMessage)
   | { t: 'message.expired'; ids: string[] }
+  | { t: 'conversation.updated' | 'conversation.deleted'; conversationId: string }
   | { t: 'key.rotated'; conversationId: string; keyVersion: number }
   | { t: 'error'; error: { code: string; message: string } };
 

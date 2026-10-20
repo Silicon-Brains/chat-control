@@ -1,6 +1,7 @@
 'use client';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useRef } from 'react';
 import { CONVERSATIONS_KEY } from '@/hooks/use-conversations';
 import { conversationsApi } from '@/lib/api/endpoints';
 import { toChatMessage } from '@/lib/chat/pipeline';
@@ -14,6 +15,10 @@ import type { Conversation } from '@/types';
 /** Owns the WebSocket lifecycle and routes server events into the chat store. */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const qc = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
   const userId = useSession((s) => s.user?.id);
   const keyReady = useSession((s) => s.keyReady);
 
@@ -42,6 +47,18 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         case 'key.rotated':
           void qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
           break;
+        case 'conversation.updated':
+          void qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
+          void qc.invalidateQueries({ queryKey: ['conversation', event.conversationId] });
+          break;
+        case 'conversation.deleted':
+          qc.setQueryData<Conversation[]>(CONVERSATIONS_KEY, (current) =>
+            current?.filter((conversation) => conversation.id !== event.conversationId),
+          );
+          qc.removeQueries({ queryKey: ['conversation', event.conversationId] });
+          useChatStore.getState().clearConversation(event.conversationId);
+          if (pathnameRef.current === `/chats/${event.conversationId}`) router.replace('/chats');
+          break;
         case 'error':
           toast.error(event.error.message);
           break;
@@ -56,7 +73,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       offEvents();
       realtime.stop();
     };
-  }, [userId, keyReady, qc]);
+  }, [userId, keyReady, qc, router]);
 
   return <>{children}</>;
 }

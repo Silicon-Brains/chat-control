@@ -3,6 +3,7 @@ import { generateIdentityKeyPair } from './keys';
 import { buildAad, decryptMessage, encryptMessage } from './message';
 import { fromB64, toB64 } from './encoding';
 import { generateConversationKey, unwrapConversationKey, wrapConversationKey } from './wrap';
+import { MAX_PLAINTEXT_BYTES } from '@/lib/constants';
 
 async function setup() {
   const alice = await generateIdentityKeyPair();
@@ -45,6 +46,8 @@ describe('conversation key wrapping', () => {
 
   it('rejects oversized plaintext', async () => {
     const { key } = await setup();
-    await expect(encryptMessage(key, 'a'.repeat(9000), buildAad('c', 'u', 1))).rejects.toThrow();
+    await expect(
+      encryptMessage(key, 'a'.repeat(MAX_PLAINTEXT_BYTES + 1), buildAad('c', 'u', 1)),
+    ).rejects.toThrow();
   });
 });

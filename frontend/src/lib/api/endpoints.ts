@@ -43,8 +43,12 @@ export interface CreateConversationBody {
 
 export const conversationsApi = {
   list: () => api<Conversation[]>('/conversations'),
+  get: (id: string) => api<Conversation>(`/conversations/${id}`),
   create: (body: CreateConversationBody) =>
     api<{ id: string; currentKeyVersion: number }>('/conversations', { method: 'POST', body }),
+  updateGroup: (id: string, body: { name?: string; groupIcon?: string | null }) =>
+    api<Conversation>(`/conversations/${id}`, { method: 'PATCH', body }),
+  deleteGroup: (id: string) => api(`/conversations/${id}`, { method: 'DELETE' }),
   messages: (id: string, cursor?: string | null, signal?: AbortSignal) =>
     api<Page<EncryptedMessage>>(`/conversations/${id}/messages`, {
       query: { cursor: cursor ?? undefined },

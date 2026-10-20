@@ -7,8 +7,6 @@ const make = () =>
         staleTime: 15_000,
         retry: 1,
         refetchOnWindowFocus: true,
-        refetchInterval: 30_000,
-        refetchIntervalInBackground: false,
       },
     },
   });

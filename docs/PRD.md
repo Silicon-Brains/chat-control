@@ -33,7 +33,8 @@ Small to mid-size private groups (company teams, communities, project groups) ma
 6. **End-to-End Encryption** — client-side keys, server stores ciphertext only.
 7. **Auto-clear after 10 hours** — server purge + client purge + expiry countdown in UI.
 8. **Real-time messaging** over WebSockets.
-9. **Admin dashboard** — users, active sessions, audit log, security status.
+9. **Voice messages** — record, preview, and send encrypted audio notes up to 30 seconds.
+10. **Admin dashboard** — users, active sessions, audit log, security status.
 
 ## 7. Functional Requirements
 - FR1: Only authenticated admins can call user-management endpoints; only approved users can use chat APIs or WebSockets.
@@ -41,12 +42,13 @@ Small to mid-size private groups (company teams, communities, project groups) ma
 - FR3: Admin approval sets the Clerk user role and activates the local account; rejection deletes the registration.
 - FR4: Admin can disable/enable/delete a user and reset a device key.
 - FR5: Users can start a 1:1 chat with any active user.
-- FR6: Users can create groups with active users; owner can add/remove members.
+- FR6: Users can create groups with active users; owners can add/remove members, edit group names/icons, and delete a group for everyone.
 - FR7: Messages are encrypted in the browser before sending; decrypted in the browser after receiving.
 - FR8: Each message has `expires_at = created_at + 10h`; expired messages are never returned and are physically deleted.
 - FR9: Unread counts per conversation.
 - FR10: Clerk manages sign-in, MFA and sessions; the API verifies Clerk session JWTs.
 - FR11: All admin actions are written to an audit log.
+- FR12: Users can record, preview, send, and play end-to-end encrypted voice notes up to 30 seconds; recordings remain ciphertext-only on the server and follow the standard message expiry.
 
 ## 8. Non-Functional Requirements
 | Area | Target |
@@ -66,7 +68,7 @@ Small to mid-size private groups (company teams, communities, project groups) ma
 
 ## 10. User Journeys
 - **Onboarding:** User signs up and verifies email → account is pending → admin approves → user signs in → browser generates keypair → public key uploaded → ready.
-- **Send message:** open chat → type → encrypt locally → WS send → server stores ciphertext + `expires_at` → fan-out → recipients decrypt.
+- **Send message:** open chat → type or record a voice note → encrypt locally → WS send → server stores ciphertext + `expires_at` → fan-out → recipients decrypt.
 - **Expiry:** message shows countdown; at 10 h it disappears everywhere.
 - **Lost device:** admin regenerates code → user logs in on new device → new keypair (old messages already expired or unreadable).
 
@@ -93,7 +95,7 @@ None for MVP. Neon (Postgres) only. Optional Redis for multi-instance fan-out (l
 Forward secrecy (Double Ratchet), encrypted attachments with TTL, read receipts, typing indicators, multi-device key sync, mobile app, per-conversation custom TTL.
 
 ## 17. Out of Scope (MVP)
-Public access without approval, voice/video calls, file attachments, message editing, search, server-side message moderation, federation.
+Public access without approval, live voice/video calls, general file attachments, message editing, search, server-side message moderation, federation.
 
 ## 18. Open Questions / Assumptions
 1. **"One to many"** assumed = group chat + admin-controlled broadcast channel.

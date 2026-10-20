@@ -40,7 +40,8 @@
 - Validate membership on every REST call **and** every WS event.
 - Set headers: strict CSP (no inline scripts, nonces), HSTS, `X-Content-Type-Options`, `Referrer-Policy: no-referrer`, `frame-ancestors 'none'`.
 - Strict CORS allow-list; cookies `HttpOnly; Secure; SameSite=Strict`.
-- Cap message ciphertext at 8 KB; WS rate limit 20 msgs / 10 s.
+- Cap message ciphertext at 256 KiB; voice notes are limited to 30 seconds and 160 KiB before encryption. WS rate limit 20 msgs / 10 s.
+- Record voice notes in the browser and encrypt them with the conversation key before sending; never upload raw audio.
 - Write audit logs for all admin actions and failed logins (no content, no secrets).
 - Pin and audit dependencies (`pip-audit`, `npm audit`) in CI.
 

@@ -9,6 +9,7 @@ import { VerifiedMark } from '@/components/ui/verified-mark';
 import { conversationsApi } from '@/lib/api/endpoints';
 import { canPost, conversationTitle } from '@/lib/chat/helpers';
 import { prepareOutgoing, toChatMessage } from '@/lib/chat/pipeline';
+import { serializeVoiceMessage } from '@/lib/chat/voice';
 import { MESSAGE_TTL_MS } from '@/lib/constants';
 import { realtime } from '@/lib/ws/client';
 import { useChatStore } from '@/stores/chat';
@@ -16,6 +17,7 @@ import { useSession } from '@/stores/session';
 import { toast } from '@/stores/toast';
 import type { ChatMessage, Conversation } from '@/types';
 import { Composer } from './composer';
+import { GroupActions } from './group-actions';
 import { MessageBubble } from './message-bubble';
 
 const EMPTY: ChatMessage[] = [];
@@ -71,7 +73,7 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
     try { setCursor(await fetchPage(cursor)); } finally { setLoadingMore(false); }
   }
 
-  async function send(text: string) {
+  async function send(text: string): Promise<boolean> {
     try {
       const out = await prepareOutgoing(conversation, user.id, text);
       const now = Date.now();
@@ -87,9 +89,21 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
       if (!ok) {
         useChatStore.getState().markFailed(convId, out.id);
         toast.error('You’re offline. Message not sent.');
+        return false;
       }
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Message not sent.');
+      return false;
+    }
+  }
+
+  async function sendVoice(blob: Blob, durationMs: number): Promise<boolean> {
+    try {
+      return await send(await serializeVoiceMessage(blob, durationMs));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Voice message not sent.');
+      return false;
     }
   }
 
@@ -107,7 +121,7 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
         <Link href="/chats" aria-label="Back to chats" className="grid h-10 w-10 place-items-center rounded-full hover:bg-primary-500/10 lg:hidden">
           <ArrowLeft className="h-5 w-5" aria-hidden />
         </Link>
-        <Avatar name={title} />
+        <Avatar name={title} icon={conversation.type === 'group' ? conversation.groupIcon : null} />
         <div className="min-w-0 flex-1">
           <h2 className="flex items-center gap-1 truncate font-semibold">
             {title}{directPeer?.managementVerified && <VerifiedMark />}
@@ -116,6 +130,9 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
         </div>
         {connection !== 'open' && (
           <span className="inline-flex items-center gap-1 text-xs text-warning"><WifiOff className="h-3.5 w-3.5" aria-hidden />Reconnecting…</span>
+        )}
+        {conversation.type === 'group' && conversation.myRole === 'owner' && (
+          <GroupActions conversation={conversation} />
         )}
       </header>
 
@@ -151,6 +168,7 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
 
       <Composer
         onSend={send}
+        onSendVoice={sendVoice}
         readOnlyReason={canPost(conversation) ? undefined : 'Only senders can post in this broadcast channel.'}
       />
     </section>

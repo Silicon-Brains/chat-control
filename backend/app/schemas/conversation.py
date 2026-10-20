@@ -60,6 +60,23 @@ class GrantKeysRequest(CamelModel):
     keys: list[KeyGrant] = Field(min_length=1, max_length=500)
 
 
+class UpdateGroupRequest(CamelModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    group_icon: str | None = Field(default=None, max_length=16)
+
+    @model_validator(mode="after")
+    def _validate_update(self) -> UpdateGroupRequest:
+        if not self.model_fields_set.intersection({"name", "group_icon"}):
+            raise ValueError("At least one group field must be supplied")
+        if "name" in self.model_fields_set:
+            if self.name is None:
+                raise ValueError("Group name cannot be empty")
+            self.name = self.name.strip()
+            if not self.name:
+                raise ValueError("Group name cannot be empty")
+        return self
+
+
 class MemberOut(CamelModel):
     user_id: uuid.UUID
     role: str
@@ -68,24 +85,26 @@ class MemberOut(CamelModel):
     has_current_key: bool | None = None
 
 
-class ConversationOut(CamelModel):
-    id: uuid.UUID
-    type: str
-    name: str | None = None
-    current_key_version: int
-    rotation_required: bool
-    created_at: datetime
-    members: list[MemberOut]
-    my_role: str | None = None
-    has_current_key: bool | None = None
-    unread_count: int = 0
-    last_message_at: datetime | None = None
-
-
 class ConversationKeyOut(CamelModel):
     key_version: int
     wrapped_key: WrappedKey
     wrapper_pub: WrapperPub
+
+
+class ConversationOut(CamelModel):
+    id: uuid.UUID
+    type: str
+    name: str | None = None
+    group_icon: str | None = None
+    current_key_version: int
+    rotation_required: bool
+    created_at: datetime
+    members: list[MemberOut]
+    keys: list[ConversationKeyOut] = Field(default_factory=list)
+    my_role: str | None = None
+    has_current_key: bool | None = None
+    unread_count: int = 0
+    last_message_at: datetime | None = None
 
 
 class ConversationCreated(CamelModel):

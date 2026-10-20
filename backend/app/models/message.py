@@ -16,7 +16,7 @@ class Message(Base):
 
     __tablename__ = "messages"
     __table_args__ = (
-        CheckConstraint("octet_length(ciphertext) BETWEEN 16 AND 8192", name="ciphertext_size"),
+        CheckConstraint("octet_length(ciphertext) BETWEEN 16 AND 262144", name="ciphertext_size"),
         CheckConstraint("octet_length(nonce) = 12", name="nonce_size"),
         Index("ix_messages_conversation_history", "conversation_id", text("created_at DESC"), text("id DESC")),
         Index("ix_messages_expires_at", "expires_at"),

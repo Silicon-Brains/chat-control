@@ -35,6 +35,7 @@ const withClerk = clerkMiddleware(
       directives: {
         'connect-src': connectSrc,
         'img-src': ['blob:', 'data:'],
+        'media-src': ['blob:'],
         'object-src': ["'none'"],
         'base-uri': ["'self'"],
         'form-action': ["'self'"],
@@ -53,6 +54,7 @@ function plain(req: NextRequest) {
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' blob: data:",
+    "media-src 'self' blob:",
     "font-src 'self'",
     `connect-src ${["'self'", ...connectSrc].join(' ')}`,
     "object-src 'none'",

@@ -15,6 +15,7 @@ from app.schemas.conversation import (
     GrantKeysRequest,
     RemoveMemberRequest,
     RotateKeyRequest,
+    UpdateGroupRequest,
 )
 from app.schemas.message import MessageOut, MessagePage
 from app.services.chat_service import ChatService
@@ -43,6 +44,25 @@ async def get_conversation(
     conversation_id: uuid.UUID, user: CurrentUser, session: SessionDep, container: ContainerDep
 ) -> ConversationOut:
     return await ChatService(session, container).get_for_user(user, conversation_id)
+
+
+@router.patch("/{conversation_id}", response_model=ConversationOut)
+async def update_group(
+    conversation_id: uuid.UUID,
+    body: UpdateGroupRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    container: ContainerDep,
+) -> ConversationOut:
+    return await ChatService(session, container).update_group(user, conversation_id, body)
+
+
+@router.delete("/{conversation_id}", status_code=NO_CONTENT)
+async def delete_group(
+    conversation_id: uuid.UUID, user: CurrentUser, session: SessionDep, container: ContainerDep
+) -> Response:
+    await ChatService(session, container).delete_group(user, conversation_id)
+    return Response(status_code=NO_CONTENT)
 
 
 @router.get("/{conversation_id}/keys", response_model=list[ConversationKeyOut])

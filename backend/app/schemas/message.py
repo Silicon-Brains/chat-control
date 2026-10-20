@@ -9,7 +9,7 @@ from pydantic import Field, TypeAdapter
 from app.core.encoding import b64encode
 from app.schemas.base import CamelModel, b64_bytes
 
-Ciphertext = b64_bytes(16, 8192)  # AES-GCM tag alone is 16 bytes; cap per rules.md
+Ciphertext = b64_bytes(16, 262_144)  # AES-GCM tag alone is 16 bytes; includes encrypted voice notes.
 Nonce = b64_bytes(12, 12)
 
 

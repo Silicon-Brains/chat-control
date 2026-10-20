@@ -1,23 +1,50 @@
 'use client';
+import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import { ChatThread } from '@/components/chat/chat-thread';
+import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useConversations } from '@/hooks/use-conversations';
+import { conversationsApi } from '@/lib/api/endpoints';
+import { ApiError } from '@/lib/api/client';
+import { ensureKeys } from '@/lib/crypto';
 import { SearchX } from 'lucide-react';
+import { useSession } from '@/stores/session';
 
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>();
-  const { data, isLoading } = useConversations();
-  const conversation = data?.find((c) => c.id === id);
+  const userId = useSession((s) => s.user?.id);
+  const keyReady = useSession((s) => s.keyReady);
+  const { data: conversation, isPending, isError, error, refetch } = useQuery({
+    queryKey: ['conversation', id],
+    enabled: Boolean(id && userId && keyReady),
+    queryFn: async () => {
+      if (!userId) throw new Error('Your session is not ready.');
+      const result = await conversationsApi.get(id);
+      await ensureKeys(userId, result);
+      return result;
+    },
+  });
 
-  if (isLoading) return <div className="glass h-full p-6"><Skeleton className="h-full" /></div>;
-  if (!conversation) {
+  if (!keyReady || isPending) return <div className="glass h-full p-6"><Skeleton className="h-full" /></div>;
+  if (isError) {
+    const notFound = error instanceof ApiError && error.status === 404;
     return (
       <div className="glass grid h-full place-items-center">
-        <EmptyState icon={SearchX} title="Conversation not found"><p className="text-sm">It may have been removed, or you’re not a member.</p></EmptyState>
+        <EmptyState
+          icon={SearchX}
+          title={notFound ? 'Conversation not found' : 'Couldn’t load conversation'}
+        >
+          <p className="text-sm">
+            {notFound
+              ? 'It may have been removed, or you’re not a member.'
+              : error instanceof Error ? error.message : 'Check your connection and try again.'}
+          </p>
+          {!notFound && <Button variant="secondary" size="sm" onClick={() => void refetch()}>Try again</Button>}
+        </EmptyState>
       </div>
     );
   }
+  if (!conversation) return <div className="glass h-full p-6"><Skeleton className="h-full" /></div>;
   return <ChatThread key={conversation.id} conversation={conversation} />;
 }

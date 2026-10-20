@@ -25,6 +25,7 @@ class ConversationView:
     conversation: Conversation
     my_role: MemberRole | None
     members: list[tuple[uuid.UUID, MemberRole, str, bool]] = field(default_factory=list)
+    keys: list[tuple[int, bytes, bytes]] = field(default_factory=list)
     has_current_key: bool | None = None
     unread_count: int = 0
     last_message_at: datetime | None = None
@@ -251,6 +252,22 @@ class ConversationRepository:
 
         if user_id is not None:
             cm = ConversationMember
+            key_rows = await self.session.execute(
+                select(
+                    ConversationKey.conversation_id,
+                    ConversationKey.key_version,
+                    ConversationKey.wrapped_key,
+                    ConversationKey.wrapper_pub,
+                )
+                .where(
+                    ConversationKey.user_id == user_id,
+                    ConversationKey.conversation_id.in_(ids),
+                )
+                .order_by(ConversationKey.key_version)
+            )
+            for cid, key_version, wrapped_key, wrapper_pub in key_rows.all():
+                views[cid].keys.append((key_version, wrapped_key, wrapper_pub))
+
             unread_rows = await self.session.execute(
                 select(Message.conversation_id, func.count())
                 .join(cm, and_(cm.conversation_id == Message.conversation_id, cm.user_id == user_id))

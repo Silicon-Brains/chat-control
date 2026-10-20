@@ -46,7 +46,8 @@ def test_key_registration_and_directory(world: World) -> None:
 # ----------------------------------------------------------------- direct chat + realtime
 def test_direct_chat_end_to_end(world: World) -> None:
     c, alice, bob, carol = world.client, world.users["alice"], world.users["bob"], world.users["carol"]
-    req = {"type": "direct", "members": [grant(alice.user_id), grant(bob.user_id)]}
+    alice_key, bob_key = grant(alice.user_id), grant(bob.user_id)
+    req = {"type": "direct", "members": [alice_key, bob_key]}
     r = c.post(f"{API}/conversations", headers=alice.auth, json=req)
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -57,6 +58,12 @@ def test_direct_chat_end_to_end(world: World) -> None:
     )
     assert again.status_code == 200 and again.json()["id"] == cid and again.json()["created"] is False
     assert len(c.get(f"{API}/conversations/{cid}/keys", headers=bob.auth).json()) == 1
+    listed = {item["id"]: item for item in c.get(f"{API}/conversations", headers=alice.auth).json()}[cid]
+    fetched = c.get(f"{API}/conversations/{cid}", headers=alice.auth).json()
+    assert listed["keys"] == fetched["keys"]
+    assert listed["keys"] == [
+        {"keyVersion": 1, "wrappedKey": alice_key["wrappedKey"], "wrapperPub": alice_key["wrapperPub"]}
+    ]
     assert c.get(f"{API}/conversations/{cid}", headers=carol.auth).status_code == 404  # no existence oracle
     assert c.get(f"{API}/conversations/{cid}/messages", headers=carol.auth).status_code == 404
 
@@ -148,6 +155,36 @@ def test_ws_rate_limit(world: World) -> None:
 
 
 # ------------------------------------------------------------------ group + key rotation
+def test_group_owner_can_edit_and_delete_for_everyone(world: World) -> None:
+    c, alice, bob = world.client, world.users["alice"], world.users["bob"]
+    created = c.post(
+        f"{API}/conversations",
+        headers=alice.auth,
+        json={"type": "group", "name": "Original", "members": [grant(alice.user_id), grant(bob.user_id)]},
+    )
+    assert created.status_code == 201, created.text
+    cid = created.json()["id"]
+
+    denied = c.patch(f"{API}/conversations/{cid}", headers=bob.auth, json={"name": "Changed"})
+    assert denied.status_code == 403
+
+    updated = c.patch(
+        f"{API}/conversations/{cid}",
+        headers=alice.auth,
+        json={"name": " Updated team ", "groupIcon": "🎯"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Updated team"
+    assert updated.json()["groupIcon"] == "🎯"
+    assert c.get(f"{API}/conversations/{cid}", headers=bob.auth).json()["groupIcon"] == "🎯"
+    assert c.delete(f"{API}/conversations/{cid}", headers=bob.auth).status_code == 403
+    assert c.get(f"{API}/conversations/{cid}", headers=bob.auth).status_code == 200
+
+    assert c.delete(f"{API}/conversations/{cid}", headers=alice.auth).status_code == 204
+    assert c.get(f"{API}/conversations/{cid}", headers=alice.auth).status_code == 404
+    assert c.get(f"{API}/conversations/{cid}", headers=bob.auth).status_code == 404
+
+
 def test_group_membership_and_key_rotation(world: World) -> None:
     c, alice, bob, carol, dave = (world.client, *(world.users[n] for n in ("alice", "bob", "carol", "dave")))
     r = c.post(

@@ -8,6 +8,7 @@ interface ChatState {
   upsert: (conversationId: string, incoming: ChatMessage[]) => void;
   markFailed: (conversationId: string, id: string) => void;
   remove: (ids: string[]) => void;
+  clearConversation: (conversationId: string) => void;
   prune: (now: number) => void;
   reset: () => void;
 }
@@ -40,6 +41,12 @@ export const useChatStore = create<ChatState>((set) => ({
       const next: Record<string, ChatMessage[]> = {};
       for (const [cid, list] of Object.entries(s.messages)) next[cid] = list.filter((m) => !drop.has(m.id));
       return { messages: next };
+    }),
+  clearConversation: (conversationId) =>
+    set((s) => {
+      const messages = { ...s.messages };
+      delete messages[conversationId];
+      return { messages };
     }),
   prune: (now) =>
     set((s) => {

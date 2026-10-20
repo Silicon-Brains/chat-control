@@ -71,7 +71,7 @@ export function ConversationList({ activeId, initialFilter = 'all' }: { activeId
                     aria-current={c.id === activeId ? 'page' : undefined}
                     className={cn('flex items-center gap-3 rounded-tile p-3 transition', c.id === activeId ? 'bg-primary-500/15' : 'hover:bg-primary-500/10')}
                   >
-                    <Avatar name={title} />
+                    <Avatar name={title} icon={c.type === 'group' ? c.groupIcon : null} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1 truncate font-medium text-ink-900">
                         {title}{peer?.managementVerified && <VerifiedMark />}

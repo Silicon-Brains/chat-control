@@ -1,8 +1,11 @@
 import { AlertCircle, Clock, LockKeyhole } from 'lucide-react';
+import { useMemo } from 'react';
 import { cn, formatTime } from '@/lib/utils';
 import { VerifiedMark } from '@/components/ui/verified-mark';
+import { isVoiceMessage, parseVoiceMessage, voicePayloadToBlob } from '@/lib/chat/voice';
 import type { ChatMessage } from '@/types';
 import { ExpiryChip } from './expiry-chip';
+import { VoiceMessagePlayer } from './voice-message-player';
 
 export function MessageBubble({
   message,
@@ -16,6 +19,12 @@ export function MessageBubble({
   senderVerified?: boolean;
 }) {
   const broken = message.status === 'undecryptable';
+  const voicePayload = useMemo(() => parseVoiceMessage(message.text), [message.text]);
+  const voiceBlob = useMemo(
+    () => (voicePayload ? voicePayloadToBlob(voicePayload) : null),
+    [voicePayload],
+  );
+  const malformedVoice = !broken && !voicePayload && isVoiceMessage(message.text);
   return (
     <li className={cn('flex animate-fade-up', mine ? 'justify-end' : 'justify-start')}>
       <div className={cn('max-w-[min(34rem,85%)]', mine && 'text-right')}>
@@ -26,7 +35,8 @@ export function MessageBubble({
         )}
         <div
           className={cn(
-            'rounded-bubble px-4 py-2.5 text-left text-[15px] leading-6',
+            'rounded-bubble text-left text-[15px] leading-6',
+            voicePayload ? 'p-2' : 'px-4 py-2.5',
             mine ? 'rounded-br-md bg-primary-gradient text-white' : 'glass !rounded-bubble rounded-bl-md text-ink-900',
             message.status === 'failed' && 'ring-2 ring-danger',
           )}
@@ -34,6 +44,12 @@ export function MessageBubble({
           {broken ? (
             <span className="inline-flex items-center gap-2 italic opacity-80">
               <LockKeyhole className="h-4 w-4" aria-hidden />Can’t decrypt on this device
+            </span>
+          ) : voicePayload && voiceBlob ? (
+            <VoiceMessagePlayer audioBlob={voiceBlob} durationMs={voicePayload.durationMs} />
+          ) : malformedVoice ? (
+            <span className="inline-flex items-center gap-2 italic opacity-80">
+              <LockKeyhole className="h-4 w-4" aria-hidden />Can’t play this voice message
             </span>
           ) : (
             // React escapes text — never use dangerouslySetInnerHTML for messages.

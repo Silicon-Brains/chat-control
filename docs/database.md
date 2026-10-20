@@ -42,6 +42,7 @@ conversations
  ├── id              uuid PK
  ├── type            enum('direct','group','broadcast') NOT NULL
  ├── name            text NULL                 -- group/broadcast only
+ ├── group_icon      varchar(16) NULL          -- optional emoji for groups (migration 0006)
  ├── direct_pair_key text UNIQUE NULL          -- "minUUID:maxUUID" for direct; prevents duplicates
  ├── current_key_version int NOT NULL DEFAULT 1
  ├── created_by      uuid → users.id
@@ -68,7 +69,7 @@ messages
  ├── id              uuid PK (v7)
  ├── conversation_id uuid → conversations.id ON DELETE CASCADE
  ├── sender_id       uuid → users.id
- ├── ciphertext      bytea NOT NULL (CHECK octet_length ≤ 8192)
+ ├── ciphertext      bytea NOT NULL (CHECK octet_length ≤ 262144; migration 0005)
  ├── nonce           bytea NOT NULL (12 bytes)
  ├── key_version     int NOT NULL
  ├── created_at      timestamptz NOT NULL DEFAULT now()
@@ -87,6 +88,7 @@ audit_logs
 - `messages.expires_at` is set by **DB default**, never by the client.
 - Direct conversations: exactly 2 members (enforced in service + `direct_pair_key` unique).
 - Broadcast: only members with role `sender`/`owner` may insert (service-level check).
+- Group owners can update the group name/icon or delete the group for everyone; deletion cascades to members, wrapped keys and messages.
 - `ON DELETE CASCADE` keeps orphaned data out.
 
 ## 5. Indexes
@@ -127,6 +129,7 @@ Also purge: expired `ws_tickets`, superseded `conversation_keys` older than 10 h
 - Least-privilege DB role for app (no DDL); separate migration role.
 - Only ciphertext + metadata stored; no plaintext, no private keys, no Clerk session tokens.
 - Public Clerk sign-ups are stored as `pending`; only an admin approval changes the Clerk role and local status to `active`.
+- Voice notes are recorded and encrypted in the sender's browser; only ciphertext is stored. Clips are limited to 30 seconds and 160 KiB before encryption.
 - Secrets (DB URL, Clerk secret key) from env/secret manager.
 - Enable Neon IP allow-list if hosting is static; backups follow the same 10 h rule for message content (short PITR window — see System_Design §10).
 - Row access always through service layer with membership checks.

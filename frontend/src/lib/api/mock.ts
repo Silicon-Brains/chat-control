@@ -14,7 +14,7 @@ export const MOCK_CREDENTIALS = {
 
 interface MockUser extends AdminUser { publicKey: string | null }
 interface MockConv {
-  id: string; type: Conversation['type']; name: string | null; currentKeyVersion: number;
+  id: string; type: Conversation['type']; name: string | null; groupIcon: string | null; currentKeyVersion: number;
   members: Conversation['members']; keys: Record<string, WrappedKey[]>; messages: EncryptedMessage[];
 }
 
@@ -72,6 +72,22 @@ const requireAdmin = () => {
 };
 const code = () => [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, '0')).join('');
 const fail = (status: number, c: string, m: string) => { throw new ApiError(status, c, m); };
+const toConversation = (c: MockConv, userId: string): Conversation => {
+  const last = c.messages.at(-1);
+  return {
+    id: c.id,
+    type: c.type,
+    name: c.name,
+    groupIcon: c.groupIcon,
+    currentKeyVersion: c.currentKeyVersion,
+    members: c.members,
+    keys: c.keys[userId] ?? [],
+    myRole: c.members.find((member) => member.userId === userId)!.role,
+    unreadCount: 0,
+    lastMessageAt: last?.createdAt ?? null,
+    nextExpiryAt: c.messages[0]?.expiresAt ?? null,
+  };
+};
 
 export async function mockRefresh(): Promise<RefreshResponse | null> {
   await (ready ??= seed());
@@ -125,14 +141,7 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
 
   if (path === '/conversations' && method === 'GET') {
     const me = requireUser();
-    const list: Conversation[] = convs.filter((c) => c.members.some((x) => x.userId === me.id)).map((c) => {
-      const last = c.messages.at(-1);
-      return {
-        id: c.id, type: c.type, name: c.name, currentKeyVersion: c.currentKeyVersion, members: c.members,
-        keys: c.keys[me.id] ?? [], myRole: c.members.find((x) => x.userId === me.id)!.role, unreadCount: 0,
-        lastMessageAt: last?.createdAt ?? null, nextExpiryAt: c.messages[0]?.expiresAt ?? null,
-      };
-    });
+    const list = convs.filter((c) => c.members.some((x) => x.userId === me.id)).map((c) => toConversation(c, me.id));
     return out(list);
   }
   if (path === '/conversations' && method === 'POST') {
@@ -143,7 +152,7 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
       if (existing) return out({ id: existing.id, currentKeyVersion: existing.currentKeyVersion });
     }
     const conv: MockConv = {
-      id: crypto.randomUUID(), type: body.type, name: body.name ?? null, currentKeyVersion: 1, messages: [],
+      id: crypto.randomUUID(), type: body.type, name: body.name ?? null, groupIcon: null, currentKeyVersion: 1, messages: [],
       members: ids.map((id) => ({
         userId: id,
         displayName: users.find((u) => u.id === id)?.displayName ?? id,
@@ -155,6 +164,28 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
     };
     convs.push(conv);
     return out({ id: conv.id, currentKeyVersion: 1 });
+  }
+  if ((m = path.match(/^\/conversations\/([^/]+)$/))) {
+    const me = requireUser();
+    const index = convs.findIndex((conversation) => conversation.id === m![1]);
+    const conv = convs[index];
+    if (!conv || !conv.members.some((member) => member.userId === me.id)) fail(404, 'NOT_FOUND', 'Not found');
+    if (method === 'GET') return out(toConversation(conv!, me.id));
+    if (method === 'PATCH' || method === 'DELETE') {
+      if (conv!.type !== 'group') fail(409, 'NOT_A_GROUP', 'Only groups can be edited or deleted');
+      if (conv!.members.find((member) => member.userId === me.id)?.role !== 'owner') {
+        fail(403, 'NOT_OWNER', 'Only the owner can do this');
+      }
+      if (method === 'DELETE') {
+        convs.splice(index, 1);
+        log(me, 'conversation.group_delete', conv!.id);
+        return out();
+      }
+      if (typeof body.name === 'string') conv!.name = body.name.trim();
+      if (body.groupIcon === null || typeof body.groupIcon === 'string') conv!.groupIcon = body.groupIcon;
+      log(me, 'conversation.group_update', conv!.id);
+      return out(toConversation(conv!, me.id));
+    }
   }
   if ((m = path.match(/^\/conversations\/([^/]+)\/messages$/))) {
     const me = requireUser();
