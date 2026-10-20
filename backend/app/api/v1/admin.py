@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.api.deps import AdminUser, ClientIp, ContainerDep, SessionDep, enforce_admin_network
-from app.models import UserStatus
+from app.models import UserRole, UserStatus
 from app.schemas.conversation import ConversationOut
 from app.schemas.user import (
     AdminStats,
@@ -39,6 +39,7 @@ def _user_out(u) -> AdminUserOut:  # type: ignore[no-untyped-def]
         email=u.email,
         role=u.role.value,
         status=u.status.value,
+        management_verified=u.management_verified,
         key_fingerprint=u.key_fingerprint,
         created_at=u.created_at,
         last_login_at=u.last_login_at,
@@ -97,7 +98,19 @@ async def update_user(
     container: ContainerDep,
     ip: ClientIp,
 ) -> AdminUserOut:
-    return _user_out(await AdminService(session, container).set_status(admin, user_id, status=body.status, ip=ip))
+    service = AdminService(session, container)
+    if body.status is not None:
+        return _user_out(await service.set_status(admin, user_id, status=body.status, ip=ip))
+    role = UserRole(body.role) if body.role is not None else None
+    return _user_out(
+        await service.update_user(
+            admin,
+            user_id,
+            role=role,
+            management_verified=body.management_verified,
+            ip=ip,
+        )
+    )
 
 
 @router.post("/users/{user_id}/reset-key", status_code=NO_CONTENT)

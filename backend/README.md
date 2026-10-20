@@ -32,6 +32,7 @@ Clerk ── webhooks (user.created/updated/deleted, Svix-signed) ── instant
 * **Approval**: `POST /admin/users/{id}/approve` sets the Clerk `public_metadata.role = "user"`, activates the local account and writes an audit record. The client cannot set this role.
 * Admin invitations remain optional; invitations created by this API are stamped with `public_metadata.role = "user"` and are therefore approved on registration.
 * **Admins** are Clerk users with `public_metadata.role = "admin"`. Admin endpoints re-verify role/ban against Clerk when the mirror is >60 s old.
+* Admins can assign `admin`/`user` roles and mark any account as a verified Management Team member from the Users page. Role changes revoke the target's active sessions; the verified badge is displayed in directories and conversations.
 * **Ban/disable**: `PATCH /admin/users/{id} {"status":"disabled"}` bans in Clerk, revokes their Clerk sessions, and force-closes their WebSockets; the local mirror blocks them immediately (`403 ACCOUNT_DISABLED`).
 * Clerk session tokens live ~60 s - the frontend must call `getToken()` for every request (the Clerk SDK does this and caches for you).
 * WebSockets can't send headers, so `POST /auth/ws-ticket` (Clerk-authenticated) returns a single-use 30 s ticket for `/ws?ticket=…`.

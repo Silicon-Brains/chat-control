@@ -16,6 +16,7 @@ from app.models import (
     ConversationType,
     MemberRole,
     Message,
+    User,
 )
 
 
@@ -23,7 +24,7 @@ from app.models import (
 class ConversationView:
     conversation: Conversation
     my_role: MemberRole | None
-    members: list[tuple[uuid.UUID, MemberRole]] = field(default_factory=list)
+    members: list[tuple[uuid.UUID, MemberRole, str, bool]] = field(default_factory=list)
     has_current_key: bool | None = None
     unread_count: int = 0
     last_message_at: datetime | None = None
@@ -227,12 +228,18 @@ class ConversationRepository:
         views = {c.id: ConversationView(conversation=c, my_role=role) for c, role in rows}
 
         member_rows = await self.session.execute(
-            select(ConversationMember.conversation_id, ConversationMember.user_id, ConversationMember.role).where(
-                ConversationMember.conversation_id.in_(ids)
+            select(
+                ConversationMember.conversation_id,
+                ConversationMember.user_id,
+                ConversationMember.role,
+                User.display_name,
+                User.management_verified,
             )
+            .join(User, User.id == ConversationMember.user_id)
+            .where(ConversationMember.conversation_id.in_(ids))
         )
-        for cid, uid, role in member_rows.all():
-            views[cid].members.append((uid, role))
+        for cid, uid, role, display_name, management_verified in member_rows.all():
+            views[cid].members.append((uid, role, display_name, management_verified))
 
         last_rows = await self.session.execute(
             select(Message.conversation_id, func.max(Message.created_at))

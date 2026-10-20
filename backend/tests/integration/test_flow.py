@@ -346,14 +346,18 @@ def test_token_validation_end_to_end(world: World) -> None:
     assert c.post(f"{API}/auth/login", json={}).status_code in (404, 405)
 
 
-def test_uninvited_clerk_users_are_refused_and_never_provisioned(world: World) -> None:
+def test_self_signup_waits_for_admin_approval(world: World) -> None:
     c = world.client
     cid = world.clerk.add_user("stranger@corp.test", role=None)  # signed up in Clerk without an invitation
+    stranger = Account("stranger", cid)
     r = c.get(f"{API}/users/me", headers={"Authorization": f"Bearer {mint(cid)}"})
-    assert r.status_code == 403 and r.json()["error"]["code"] == "NOT_INVITED"
+    assert r.status_code == 403 and r.json()["error"]["code"] == "APPROVAL_PENDING"
     listing = c.get(f"{API}/admin/users?q=stranger", headers=world.admin.auth).json()["items"]
-    assert listing == []
-    bogus = world.clerk.add_user("rogue@corp.test", role="superuser")  # unknown role value == not invited
+    assert len(listing) == 1 and listing[0]["status"] == "pending"
+    approved = c.post(f"{API}/admin/users/{listing[0]['id']}/approve", headers=world.admin.auth)
+    assert approved.status_code == 200 and approved.json()["status"] == "active"
+    assert c.get(f"{API}/users/me", headers=stranger.auth).status_code == 200
+    bogus = world.clerk.add_user("rogue@corp.test", role="superuser")
     assert c.get(f"{API}/users/me", headers={"Authorization": f"Bearer {mint(bogus)}"}).status_code == 403
     gone = mint("user_does_not_exist")
     assert c.get(f"{API}/users/me", headers={"Authorization": f"Bearer {gone}"}).status_code == 401
@@ -474,6 +478,54 @@ def test_disable_enable_reset_key_and_delete(world: World) -> None:
     assert stats["usersTotal"] >= 4 and "failedLogins24h" not in stats
     actions = {a["action"] for a in c.get(f"{API}/admin/audit?limit=100", headers=admin.auth).json()["items"]}
     assert {"user.provision", "user.invite", "user.approve", "user.disable", "user.enable", "user.reset_key", "user.delete"} <= actions
+
+
+def test_management_verification_and_role_updates(world: World) -> None:
+    c, admin = world.client, world.admin
+    manager = world.make_user("manager")
+    row = c.get(f"{API}/admin/users?q=manager", headers=admin.auth).json()["items"][0]
+
+    verified = c.patch(
+        f"{API}/admin/users/{manager.user_id}",
+        headers=admin.auth,
+        json={"managementVerified": True},
+    )
+    assert verified.status_code == 200 and verified.json()["managementVerified"] is True
+    directory = c.get(f"{API}/users", headers=manager.auth).json()["items"]
+    assert next(u for u in directory if u["id"] == row["id"])["managementVerified"] is True
+
+    conversation = c.post(
+        f"{API}/conversations",
+        headers=manager.auth,
+        json={"type": "direct", "members": [grant(manager.user_id), grant(world.users["bob"].user_id)]},
+    )
+    assert conversation.status_code == 201
+    members = c.get(f"{API}/conversations", headers=manager.auth).json()[0]["members"]
+    manager_member = next(m for m in members if m["userId"] == manager.user_id)
+    assert manager_member["displayName"] == "Manager" and manager_member["managementVerified"] is True
+
+    promoted = c.patch(
+        f"{API}/admin/users/{manager.user_id}",
+        headers=admin.auth,
+        json={"role": "admin"},
+    )
+    assert promoted.status_code == 200 and promoted.json()["role"] == "admin"
+    assert manager.clerk_id in world.clerk.revoked_sessions
+    assert c.get(f"{API}/admin/users", headers=manager.auth).status_code == 200
+
+    demoted = c.patch(
+        f"{API}/admin/users/{manager.user_id}",
+        headers=admin.auth,
+        json={"role": "user"},
+    )
+    assert demoted.status_code == 200 and demoted.json()["role"] == "user"
+    assert c.get(f"{API}/admin/users", headers=manager.auth).status_code == 403
+    self_change = c.patch(
+        f"{API}/admin/users/{admin.user_id}",
+        headers=admin.auth,
+        json={"role": "user"},
+    )
+    assert self_change.status_code == 409 and self_change.json()["error"]["code"] == "SELF_ROLE_CHANGE"
 
 
 # --------------------------------------------------------------------------------- webhooks

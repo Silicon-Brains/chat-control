@@ -32,7 +32,7 @@ export default function AdminUsersPage() {
   });
   const data = pages?.pages.flatMap((page) => (Array.isArray(page) ? page : page.items));
   const [confirm, setConfirm] = useState<Confirm>(null);
-  const refresh = () => qc.invalidateQueries({ queryKey: KEY });
+  const refresh = () => qc.invalidateQueries();
 
   const run = useMutation({
     mutationFn: async (c: NonNullable<Confirm>) => {
@@ -60,6 +60,24 @@ export default function AdminUsersPage() {
     onSuccess: () => { toast.success('User approved'); void refresh(); },
     onError: () => toast.error('Couldn’t approve this user. Refresh and try again.'),
   });
+  const updateRole = useMutation({
+    mutationFn: ({ user, role }: { user: AdminUser; role: 'admin' | 'user' }) =>
+      adminApi.updateUser(user.id, { role }),
+    onSuccess: (_, { role }) => {
+      toast.success(`User role updated to ${role}`);
+      void refresh();
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Couldn’t update the user role.'),
+  });
+  const updateVerification = useMutation({
+    mutationFn: ({ user, verified }: { user: AdminUser; verified: boolean }) =>
+      adminApi.updateUser(user.id, { managementVerified: verified }),
+    onSuccess: (_, { verified }) => {
+      toast.success(verified ? 'Management Team verification added' : 'Management Team verification removed');
+      void refresh();
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Couldn’t update verification.'),
+  });
 
   return (
     <>
@@ -78,6 +96,8 @@ export default function AdminUsersPage() {
               onResetKey: (user) => setConfirm({ kind: 'resetKey', user }),
               onDelete: (user) => setConfirm({ kind: 'delete', user }),
               onToggle: (user) => (user.status === 'active' ? setConfirm({ kind: 'disable', user }) : enable.mutate(user)),
+              onRoleChange: (user, role) => updateRole.mutate({ user, role }),
+              onVerificationChange: (user, verified) => updateVerification.mutate({ user, verified }),
             }}
           />
         )}

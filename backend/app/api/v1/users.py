@@ -20,6 +20,7 @@ async def me(user: CurrentUser) -> MeResponse:
         role=user.role.value,
         email=user.email,
         key_fingerprint=user.key_fingerprint,
+        management_verified=user.management_verified,
         has_public_key=user.public_key is not None,
         created_at=user.created_at,
     )
@@ -51,6 +52,7 @@ async def directory(
                 display_name=u.display_name,
                 public_key=u.public_key,
                 key_fingerprint=u.key_fingerprint,
+                management_verified=u.management_verified,
             )
             for u in rows
         ],

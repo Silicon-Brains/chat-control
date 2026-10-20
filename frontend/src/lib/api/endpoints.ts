@@ -28,7 +28,10 @@ export const authApi = {
 
 export const usersApi = {
   me: () => api<User>('/users/me'),
-  directory: () => api<DirectoryUser[]>('/users'),
+  directory: async () => {
+    const result = await api<Page<DirectoryUser> | DirectoryUser[]>('/users');
+    return Array.isArray(result) ? result : result.items ?? [];
+  },
   registerKey: (publicKey: string) => api('/users/me/key', { method: 'PUT', body: { publicKey } }),
 };
 
@@ -67,6 +70,8 @@ export const adminApi = {
   resetCode: (id: string) => api<{ loginCode: string }>(`/admin/users/${id}/reset-code`, { method: 'POST' }),
   setStatus: (id: string, status: 'active' | 'disabled') =>
     api(`/admin/users/${id}`, { method: 'PATCH', body: { status } }),
+  updateUser: (id: string, body: { role?: 'admin' | 'user'; managementVerified?: boolean }) =>
+    api<AdminUser>(`/admin/users/${id}`, { method: 'PATCH', body }),
   deleteUser: (id: string) => api(`/admin/users/${id}`, { method: 'DELETE' }),
   audit: (cursor?: string | null) =>
     api<Page<AuditEntry>>('/admin/audit', { query: { cursor: cursor ?? undefined } }),

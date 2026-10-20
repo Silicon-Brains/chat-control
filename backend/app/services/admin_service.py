@@ -61,9 +61,59 @@ class AdminService:
         self, *, q: str | None, status: UserStatus | None, cursor: str | None, limit: int
     ) -> tuple[list[User], str | None]:
         rows = await self.users.list_page(
-            q=q, status=status, role=UserRole.USER, after_id=parse_uuid_cursor(cursor), limit=limit
+            q=q, status=status, role=None, after_id=parse_uuid_cursor(cursor), limit=limit
         )
         return rows[:limit], (str(rows[limit - 1].id) if len(rows) > limit else None)
+
+    async def update_user(
+        self,
+        actor: User,
+        user_id: uuid.UUID,
+        *,
+        role: UserRole | None,
+        management_verified: bool | None,
+        ip: str,
+    ) -> User:
+        user = await self.users.get(user_id, for_update=True)
+        if user is None:
+            raise NotFound("User not found", code="USER_NOT_FOUND")
+
+        if role is not None and role != user.role:
+            if actor.id == user.id:
+                raise Conflict("You cannot change your own role", code="SELF_ROLE_CHANGE")
+            if user.status == UserStatus.PENDING:
+                raise Conflict("Approve the user before changing their role", code="USER_NOT_APPROVED")
+            if role == UserRole.ADMIN and user.status != UserStatus.ACTIVE:
+                raise Conflict("Only active users can be promoted to admin", code="USER_NOT_ACTIVE")
+            if role == UserRole.ADMIN:
+                clerk_user = await self.c.clerk.get_user(user.clerk_user_id)
+                if clerk_user.banned or clerk_user.locked:
+                    raise Conflict("This Clerk account is banned or locked", code="ACCOUNT_DISABLED")
+            if (
+                user.role == UserRole.ADMIN
+                and role == UserRole.USER
+                and user.status == UserStatus.ACTIVE
+                and await self.users.active_admin_count() <= 1
+            ):
+                raise Conflict("At least one active admin must remain", code="LAST_ADMIN")
+            await self.c.clerk.set_user_role(user.clerk_user_id, role.value)
+            await self.c.clerk.revoke_user_sessions(user.clerk_user_id)
+            user.role = role
+            user.synced_at = utcnow()
+            self.audit.add("user.role_update", actor_id=actor.id, target_id=user.id, ip=ip, meta={"role": role.value})
+
+        if management_verified is not None and management_verified != user.management_verified:
+            user.management_verified = management_verified
+            self.audit.add(
+                "user.management_verification",
+                actor_id=actor.id,
+                target_id=user.id,
+                ip=ip,
+                meta={"verified": management_verified},
+            )
+
+        await self.session.commit()
+        return user
 
     async def approve_user(self, actor: User, user_id: uuid.UUID, *, ip: str) -> User:
         user = await self._target(user_id)

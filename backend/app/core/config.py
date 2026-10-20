@@ -7,7 +7,7 @@ import ssl
 from functools import lru_cache
 from typing import Any, Literal
 
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL, make_url
 
@@ -71,6 +71,18 @@ class Settings(BaseSettings):
     redis_url: str | None = None
 
     # ----------------------------------------------------------------------
+    @field_validator("admin_ip_allowlist")
+    @classmethod
+    def _validate_admin_ip_allowlist(cls, value: str) -> str:
+        for entry in value.split(","):
+            entry = entry.strip()
+            if entry:
+                try:
+                    ipaddress.ip_network(entry, strict=False)
+                except ValueError as exc:
+                    raise ValueError("ADMIN_IP_ALLOWLIST entries must be IP addresses or CIDRs") from exc
+        return value
+
     @model_validator(mode="after")
     def _production_guards(self) -> Settings:
         if self.is_production:

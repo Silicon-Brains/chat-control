@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { VerifiedMark } from '@/components/ui/verified-mark';
 import { conversationsApi } from '@/lib/api/endpoints';
 import { canPost, conversationTitle } from '@/lib/chat/helpers';
 import { prepareOutgoing, toChatMessage } from '@/lib/chat/pipeline';
@@ -93,7 +94,11 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
   }
 
   const title = conversationTitle(conversation, user.id);
+  const directPeer = conversation.type === 'direct'
+    ? conversation.members.find((member) => member.userId !== user.id)
+    : undefined;
   const names = new Map(conversation.members.map((m) => [m.userId, m.displayName]));
+  const verifiedMembers = new Set(conversation.members.filter((m) => m.managementVerified).map((m) => m.userId));
   const showNames = conversation.type !== 'direct';
 
   return (
@@ -104,7 +109,9 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
         </Link>
         <Avatar name={title} />
         <div className="min-w-0 flex-1">
-          <h2 className="truncate font-semibold">{title}</h2>
+          <h2 className="flex items-center gap-1 truncate font-semibold">
+            {title}{directPeer?.managementVerified && <VerifiedMark />}
+          </h2>
           <p className="flex items-center gap-1 text-xs"><Lock className="h-3 w-3" aria-hidden />End-to-end encrypted · {conversation.members.length} members</p>
         </div>
         {connection !== 'open' && (
@@ -127,7 +134,13 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
             ) : (
               <ul className="space-y-3" aria-live="polite">
                 {messages.map((m) => (
-                  <MessageBubble key={m.id} message={m} mine={m.senderId === user.id} senderName={showNames ? names.get(m.senderId) : undefined} />
+                  <MessageBubble
+                    key={m.id}
+                    message={m}
+                    mine={m.senderId === user.id}
+                    senderName={showNames ? names.get(m.senderId) : undefined}
+                    senderVerified={verifiedMembers.has(m.senderId)}
+                  />
                 ))}
               </ul>
             )}

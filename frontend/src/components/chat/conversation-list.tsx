@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { VerifiedMark } from '@/components/ui/verified-mark';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useConversations } from '@/hooks/use-conversations';
@@ -61,6 +62,7 @@ export function ConversationList({ activeId, initialFilter = 'all' }: { activeId
         ) : (
           <ul>
             {list.map((c) => {
+              const peer = c.type === 'direct' ? c.members.find((m) => m.userId !== me.id) : undefined;
               const title = conversationTitle(c, me.id);
               return (
                 <li key={c.id}>
@@ -71,7 +73,9 @@ export function ConversationList({ activeId, initialFilter = 'all' }: { activeId
                   >
                     <Avatar name={title} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium text-ink-900">{title}</span>
+                      <span className="flex items-center gap-1 truncate font-medium text-ink-900">
+                        {title}{peer?.managementVerified && <VerifiedMark />}
+                      </span>
                       <span className="block text-xs">{formatRelative(c.lastMessageAt)}</span>
                     </span>
                     {c.unreadCount > 0 && <Badge tone="solid" aria-label={`${c.unreadCount} unread`}>{c.unreadCount}</Badge>}

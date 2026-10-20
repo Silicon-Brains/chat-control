@@ -35,22 +35,26 @@ async function seed() {
     const spki = await crypto.subtle.exportKey('spki', pair.publicKey);
     users.push({
       id: `u-${username}`, username: username!, displayName: displayName!, role: 'user', status: 'active',
+      managementVerified: false,
       publicKey: toB64(spki), keyFingerprint: await fingerprintOf(spki),
       createdAt: new Date().toISOString(), lastLoginAt: null,
     });
   }
   users.push({
     id: 'u-admin', username: 'admin', displayName: 'Admin', role: 'admin', status: 'active',
+    managementVerified: false,
     publicKey: null, keyFingerprint: null, createdAt: new Date().toISOString(), lastLoginAt: null,
   });
   users.push({
     id: 'u-pending', username: 'new_member', displayName: 'New Member', role: 'user', status: 'pending',
+    managementVerified: false,
     publicKey: null, keyFingerprint: null, createdAt: new Date().toISOString(), lastLoginAt: null,
   });
 }
 
 const toUser = (u: MockUser): User => ({
-  id: u.id, username: u.username, displayName: u.displayName, role: u.role, keyFingerprint: u.keyFingerprint,
+  id: u.id, username: u.username, displayName: u.displayName, role: u.role,
+  keyFingerprint: u.keyFingerprint, managementVerified: u.managementVerified,
 });
 const current = () => {
   const id = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(SESSION) : null;
@@ -106,7 +110,10 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
   if (path === '/users') {
     requireUser();
     const dir: DirectoryUser[] = users.filter((u) => u.role === 'user' && u.status === 'active')
-      .map((u) => ({ id: u.id, username: u.username, displayName: u.displayName, publicKey: u.publicKey, keyFingerprint: u.keyFingerprint }));
+      .map((u) => ({
+        id: u.id, username: u.username, displayName: u.displayName, publicKey: u.publicKey,
+        keyFingerprint: u.keyFingerprint, managementVerified: u.managementVerified,
+      }));
     return out(dir);
   }
   if (path === '/users/me/key' && method === 'PUT') {
@@ -137,7 +144,12 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
     }
     const conv: MockConv = {
       id: crypto.randomUUID(), type: body.type, name: body.name ?? null, currentKeyVersion: 1, messages: [],
-      members: ids.map((id) => ({ userId: id, displayName: users.find((u) => u.id === id)?.displayName ?? id, role: id === me.id ? 'owner' : 'member' })),
+      members: ids.map((id) => ({
+        userId: id,
+        displayName: users.find((u) => u.id === id)?.displayName ?? id,
+        role: id === me.id ? 'owner' : 'member',
+        managementVerified: users.find((u) => u.id === id)?.managementVerified ?? false,
+      })),
       keys: Object.fromEntries((body.members as { userId: string; wrappedKey: string; wrapperPub: string }[])
         .map((x) => [x.userId, [{ keyVersion: 1, wrappedKey: x.wrappedKey, wrapperPub: x.wrapperPub }]])),
     };
@@ -182,6 +194,7 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
     if (users.some((u) => u.username === body.username)) fail(409, 'CONFLICT', 'Username taken');
     const u: MockUser = {
       id: `u-${body.username}`, username: body.username, displayName: body.displayName, role: 'user', status: 'active',
+      managementVerified: false,
       publicKey: null, keyFingerprint: null, createdAt: new Date().toISOString(), lastLoginAt: null,
     };
     users.push(u); const c = code(); MOCK_CREDENTIALS.users[u.username] = c; log(admin, 'user.create', u.id);
@@ -209,7 +222,28 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
   if ((m = path.match(/^\/admin\/users\/([^/]+)$/))) {
     const admin = requireAdmin(); const i = users.findIndex((x) => x.id === m![1]);
     if (i < 0) fail(404, 'NOT_FOUND', 'Not found');
-    if (method === 'PATCH') { users[i]!.status = body.status; log(admin, `user.${body.status === 'active' ? 'enable' : 'disable'}`, users[i]!.id); }
+    if (method === 'PATCH') {
+      const target = users[i]!;
+      if (body.status) {
+        target.status = body.status;
+        log(admin, `user.${body.status === 'active' ? 'enable' : 'disable'}`, target.id);
+      }
+      if (body.role && body.role !== target.role) {
+        if (target.id === admin.id) fail(409, 'SELF_ROLE_CHANGE', 'You cannot change your own role');
+        if (body.role === 'admin' && target.status !== 'active') fail(409, 'USER_NOT_ACTIVE', 'Only active users can be promoted to admin');
+        if (body.role === 'user' && target.role === 'admin' && target.status === 'active'
+          && users.filter((u) => u.role === 'admin' && u.status === 'active').length <= 1) {
+          fail(409, 'LAST_ADMIN', 'At least one active admin must remain');
+        }
+        target.role = body.role;
+        log(admin, 'user.role_update', target.id);
+      }
+      if (typeof body.managementVerified === 'boolean') {
+        target.managementVerified = body.managementVerified;
+        log(admin, 'user.management_verification', target.id);
+      }
+      return out(target);
+    }
     if (method === 'DELETE') { log(admin, 'user.delete', users[i]!.id); users.splice(i, 1); }
     return out();
   }

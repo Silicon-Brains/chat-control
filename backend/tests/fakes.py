@@ -65,6 +65,7 @@ class FakeClerk:
             first_name=first_name,
             last_name=last_name,
             email_verified=email_verified,
+            management_verified=False,
             banned=False,
             locked=False,
         )

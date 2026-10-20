@@ -36,6 +36,10 @@ def test_settings_validation_and_defaults(monkeypatch: pytest.MonkeyPatch) -> No
     s = Settings(**BASE, allowed_origins="https://a.com/, https://b.com")
     assert s.origins == ["https://a.com", "https://b.com"]
     assert s.authorized_parties == s.origins  # azp defaults to the allowed origins
+    s = Settings(**BASE, admin_ip_allowlist="192.0.2.10, 2001:db8::/32")
+    assert [str(network) for network in s.admin_networks] == ["192.0.2.10/32", "2001:db8::/32"]
+    with pytest.raises(ValueError, match="ADMIN_IP_ALLOWLIST"):
+        Settings(**BASE, admin_ip_allowlist="c916b7874530e4ed641a2211eb82cf6d")
 
 
 def test_uuid7_is_time_ordered() -> None:

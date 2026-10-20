@@ -7,6 +7,7 @@ import { CardHeader, GlassCard } from '@/components/ui/glass-card';
 import { HeroBanner } from '@/components/ui/hero-banner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatTile } from '@/components/ui/stat-tile';
+import { VerifiedMark } from '@/components/ui/verified-mark';
 import { useNow } from '@/hooks/use-now';
 import { useConversations } from '@/hooks/use-conversations';
 import { conversationTitle } from '@/lib/chat/helpers';
@@ -32,6 +33,7 @@ export default function DashboardHomePage() {
   const soon = loaded.filter((m) => new Date(m.expiresAt).getTime() - now < EXPIRY_WARNING_MS).length;
   const total = Math.max(loaded.length, 1);
   const latest = convs[0];
+  const latestPeer = latest?.type === 'direct' ? latest.members.find((m) => m.userId !== me.id) : undefined;
 
   return (
     <>
@@ -42,7 +44,9 @@ export default function DashboardHomePage() {
           <CardHeader title="Resume chat" href={latest ? `/chats/${latest.id}` : '/chats'} actionLabel="Open" />
           {isLoading ? <Skeleton className="h-16" /> : latest ? (
             <>
-              <p className="text-xl font-semibold text-ink-900">{conversationTitle(latest, me.id)}</p>
+              <p className="flex items-center gap-1 text-xl font-semibold text-ink-900">
+                {conversationTitle(latest, me.id)}{latestPeer?.managementVerified && <VerifiedMark />}
+              </p>
               <p className="mt-1 text-sm">Last message {formatRelative(latest.lastMessageAt, now)}</p>
             </>
           ) : <p className="text-sm">No conversations yet. Start one from Chats.</p>}
@@ -64,14 +68,21 @@ export default function DashboardHomePage() {
                   <tr><th className="pb-2 font-medium">Name</th><th className="pb-2 font-medium">Unread</th><th className="pb-2 font-medium">Last activity</th><th className="pb-2 font-medium">Next expiry</th></tr>
                 </thead>
                 <tbody>
-                  {convs.slice(0, 6).map((c, i) => (
-                    <tr key={c.id} className="h-14 border-t border-black/5">
-                      <td className={i === 0 ? 'font-bold text-ink-900' : 'text-ink-900'}><Link href={`/chats/${c.id}`} className="hover:underline">{conversationTitle(c, me.id)}</Link></td>
-                      <td>{c.unreadCount > 0 ? <Badge tone="solid">{c.unreadCount}</Badge> : '—'}</td>
-                      <td>{formatRelative(c.lastMessageAt, now)}</td>
-                      <td>{c.nextExpiryAt ? formatCountdown(new Date(c.nextExpiryAt).getTime() - now) : '—'}</td>
-                    </tr>
-                  ))}
+                  {convs.slice(0, 6).map((c, i) => {
+                    const peer = c.type === 'direct' ? c.members.find((m) => m.userId !== me.id) : undefined;
+                    return (
+                      <tr key={c.id} className="h-14 border-t border-black/5">
+                        <td className={i === 0 ? 'font-bold text-ink-900' : 'text-ink-900'}>
+                          <Link href={`/chats/${c.id}`} className="inline-flex items-center gap-1 hover:underline">
+                            {conversationTitle(c, me.id)}{peer?.managementVerified && <VerifiedMark />}
+                          </Link>
+                        </td>
+                        <td>{c.unreadCount > 0 ? <Badge tone="solid">{c.unreadCount}</Badge> : '—'}</td>
+                        <td>{formatRelative(c.lastMessageAt, now)}</td>
+                        <td>{c.nextExpiryAt ? formatCountdown(new Date(c.nextExpiryAt).getTime() - now) : '—'}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

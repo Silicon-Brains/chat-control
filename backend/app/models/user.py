@@ -33,6 +33,7 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(254))
     public_key: Mapped[bytes | None] = mapped_column(LargeBinary)
     key_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    management_verified: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     status: Mapped[UserStatus] = mapped_column(
         pg_enum(UserStatus, "user_status"),
         nullable=False,

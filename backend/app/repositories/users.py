@@ -83,3 +83,12 @@ class UserRepository:
             "disabled": by_status.get("disabled", 0),
             "total": sum(by_status.values()),
         }
+
+    async def active_admin_count(self) -> int:
+        return int(
+            (
+                await self.session.execute(
+                    select(func.count()).where(User.role == UserRole.ADMIN, User.status == UserStatus.ACTIVE)
+                )
+            ).scalar_one()
+        )

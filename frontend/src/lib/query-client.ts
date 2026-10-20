@@ -2,7 +2,15 @@ import { QueryClient, isServer } from '@tanstack/react-query';
 
 const make = () =>
   new QueryClient({
-    defaultOptions: { queries: { staleTime: 15_000, retry: 1, refetchOnWindowFocus: false } },
+    defaultOptions: {
+      queries: {
+        staleTime: 15_000,
+        retry: 1,
+        refetchOnWindowFocus: true,
+        refetchInterval: 30_000,
+        refetchIntervalInBackground: false,
+      },
+    },
   });
 
 let browserClient: QueryClient | undefined;

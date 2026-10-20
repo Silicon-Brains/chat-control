@@ -6,6 +6,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import { Skeleton } from '@/components/ui/skeleton';
+import { VerifiedMark } from '@/components/ui/verified-mark';
 import { CONVERSATIONS_KEY } from '@/hooks/use-conversations';
 import { usersApi } from '@/lib/api/endpoints';
 import { createConversation } from '@/lib/chat/create';
@@ -53,7 +54,9 @@ export function NewChatDialog({ open, onClose }: { open: boolean; onClose: () =>
               >
                 <Avatar name={u.displayName} size={36} />
                 <span className="flex-1">
-                  <span className="block font-medium text-ink-900">{u.displayName}</span>
+                  <span className="flex items-center gap-1 font-medium text-ink-900">
+                    {u.displayName}{u.managementVerified && <VerifiedMark />}
+                  </span>
                   <span className="block text-xs">@{u.username}{!u.publicKey && ' · hasn’t signed in yet'}</span>
                 </span>
                 {busyId === u.id && <span className="text-xs">Starting…</span>}

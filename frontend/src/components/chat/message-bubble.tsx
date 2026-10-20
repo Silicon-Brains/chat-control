@@ -1,14 +1,29 @@
 import { AlertCircle, Clock, LockKeyhole } from 'lucide-react';
 import { cn, formatTime } from '@/lib/utils';
+import { VerifiedMark } from '@/components/ui/verified-mark';
 import type { ChatMessage } from '@/types';
 import { ExpiryChip } from './expiry-chip';
 
-export function MessageBubble({ message, mine, senderName }: { message: ChatMessage; mine: boolean; senderName?: string }) {
+export function MessageBubble({
+  message,
+  mine,
+  senderName,
+  senderVerified = false,
+}: {
+  message: ChatMessage;
+  mine: boolean;
+  senderName?: string;
+  senderVerified?: boolean;
+}) {
   const broken = message.status === 'undecryptable';
   return (
     <li className={cn('flex animate-fade-up', mine ? 'justify-end' : 'justify-start')}>
       <div className={cn('max-w-[min(34rem,85%)]', mine && 'text-right')}>
-        {!mine && senderName && <p className="mb-1 px-2 text-xs font-medium text-ink-600">{senderName}</p>}
+        {!mine && senderName && (
+          <p className="mb-1 flex items-center gap-1 px-2 text-xs font-medium text-ink-600">
+            {senderName}{senderVerified && <VerifiedMark />}
+          </p>
+        )}
         <div
           className={cn(
             'rounded-bubble px-4 py-2.5 text-left text-[15px] leading-6',

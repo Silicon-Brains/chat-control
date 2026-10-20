@@ -50,7 +50,10 @@ def view_to_out(view: ConversationView) -> ConversationOut:
         current_key_version=c.current_key_version,
         rotation_required=c.rotation_required,
         created_at=c.created_at,
-        members=[MemberOut(user_id=uid, role=role.value) for uid, role in view.members],
+        members=[
+            MemberOut(user_id=uid, role=role.value, display_name=name, management_verified=verified)
+            for uid, role, name, verified in view.members
+        ],
         my_role=view.my_role.value if view.my_role else None,
         has_current_key=view.has_current_key,
         unread_count=view.unread_count,

@@ -9,6 +9,7 @@ export interface User {
   displayName: string;
   role: Role;
   keyFingerprint: string | null;
+  managementVerified: boolean;
 }
 
 export interface DirectoryUser {
@@ -18,6 +19,7 @@ export interface DirectoryUser {
   /** base64 SPKI (ECDH P-256); null until first login */
   publicKey: string | null;
   keyFingerprint: string | null;
+  managementVerified: boolean;
 }
 
 export interface AdminUser {
@@ -27,6 +29,7 @@ export interface AdminUser {
   email?: string | null;
   role: Role;
   status: UserStatus;
+  managementVerified: boolean;
   keyFingerprint: string | null;
   createdAt: string;
   lastLoginAt: string | null;
@@ -64,6 +67,7 @@ export interface ConversationMember {
   userId: string;
   displayName: string;
   role: MemberRole;
+  managementVerified: boolean;
 }
 
 export interface Conversation {

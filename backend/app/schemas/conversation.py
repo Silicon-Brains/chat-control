@@ -63,6 +63,8 @@ class GrantKeysRequest(CamelModel):
 class MemberOut(CamelModel):
     user_id: uuid.UUID
     role: str
+    display_name: str
+    management_verified: bool = False
     has_current_key: bool | None = None
 
 

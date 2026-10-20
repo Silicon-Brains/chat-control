@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { VerifiedMark } from '@/components/ui/verified-mark';
 import { CONVERSATIONS_KEY } from '@/hooks/use-conversations';
 import { usersApi } from '@/lib/api/endpoints';
 import { createConversation } from '@/lib/chat/create';
@@ -65,7 +66,9 @@ export default function NewGroupPage() {
                     <label className="flex cursor-pointer items-center gap-3 rounded-tile p-2.5 hover:bg-primary-500/10">
                       <input type="checkbox" checked={selected.has(u.id)} onChange={() => toggle(u.id)} className="h-4 w-4 accent-primary-500" />
                       <Avatar name={u.displayName} size={32} />
-                      <span className="flex-1 font-medium text-ink-900">{u.displayName}</span>
+                      <span className="flex flex-1 items-center gap-1 font-medium text-ink-900">
+                        {u.displayName}{u.managementVerified && <VerifiedMark />}
+                      </span>
                       {!u.publicKey && <span className="text-xs">hasn’t signed in yet</span>}
                     </label>
                   </li>
