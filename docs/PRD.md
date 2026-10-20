@@ -3,13 +3,13 @@
 > Source of truth for WHAT we are building. Working name: **VaultChat** (rename freely).
 
 ## 1. Overview
-VaultChat is an invite-only, end-to-end encrypted (E2EE) chat application. Only an admin can create user accounts. Messages are readable only by conversation members (the server stores ciphertext only) and are **automatically deleted 10 hours after being sent**.
+VaultChat is an end-to-end encrypted (E2EE) chat application. Anyone may create an account with Clerk, but a new account stays pending until an admin approves it. Messages are readable only by conversation members (the server stores ciphertext only) and are **automatically deleted 10 hours after being sent**.
 
 ## 2. Problem Statement
 Teams/groups that need private communication have no control over who joins, and mainstream chat apps keep history forever and let the provider read it. We need a closed, admin-governed chat where nothing lingers and the server cannot read content.
 
 ## 3. Goals
-- Closed membership: no public sign-up.
+- Public Clerk sign-up with admin approval required before any application access.
 - E2EE for every conversation type.
 - Ephemeral history: 10-hour TTL, enforced server-side.
 - Fast real-time delivery (WebSocket).
@@ -21,13 +21,13 @@ Small to mid-size private groups (company teams, communities, project groups) ma
 ## 5. User Roles
 | Role | Capabilities |
 |---|---|
-| **Admin** | Log in with admin code (+ TOTP); create/disable/reset users; view user list and audit log; create broadcast channels; cannot read message content. |
-| **User** | Log in with username + 10-digit hex code; 1:1 chat; group chat; read broadcast channels; manage own profile/devices. |
+| **Admin** | Sign in with Clerk and MFA; approve/disable/delete users; view user list and audit log; create broadcast channels; cannot read message content. |
+| **User** | Sign up/sign in with Clerk; await admin approval; after approval use 1:1 chat, group chat, broadcast channels and device settings. |
 
 ## 6. Core Features
-1. **Admin-only user creation** — admin enters username/display name; system generates a random 10-digit hex code, shown **once** to the admin.
-2. **User login** — username + hex code.
-3. **Admin login** — separate admin endpoint with long admin code (+ TOTP).
+1. **Self-service registration** — user creates a Clerk account and verifies their email; application access remains pending.
+2. **Admin approval** — admin reviews new registrations and approves or rejects them.
+3. **Clerk authentication** — users and admins sign in with Clerk; MFA is required for admins.
 4. **One-to-One chat** (E2EE).
 5. **One-to-Many**: (a) **Group chat** (many ↔ many), (b) **Broadcast channel** (one sender → many read-only receivers). *Assumption — see Open Questions.*
 6. **End-to-End Encryption** — client-side keys, server stores ciphertext only.
@@ -36,16 +36,16 @@ Small to mid-size private groups (company teams, communities, project groups) ma
 9. **Admin dashboard** — users, active sessions, audit log, security status.
 
 ## 7. Functional Requirements
-- FR1: Only authenticated admins can call user-management endpoints.
-- FR2: Hex code = 10 hex characters from a CSPRNG; stored only as an Argon2id hash; displayed once.
-- FR3: Admin can regenerate a user's code (invalidates old code, sessions, and device key).
-- FR4: Admin can disable/enable/delete a user.
+- FR1: Only authenticated admins can call user-management endpoints; only approved users can use chat APIs or WebSockets.
+- FR2: New Clerk accounts are mirrored as `pending`; they receive no application access before approval.
+- FR3: Admin approval sets the Clerk user role and activates the local account; rejection deletes the registration.
+- FR4: Admin can disable/enable/delete a user and reset a device key.
 - FR5: Users can start a 1:1 chat with any active user.
 - FR6: Users can create groups with active users; owner can add/remove members.
 - FR7: Messages are encrypted in the browser before sending; decrypted in the browser after receiving.
 - FR8: Each message has `expires_at = created_at + 10h`; expired messages are never returned and are physically deleted.
 - FR9: Unread counts per conversation.
-- FR10: Sessions: access token (short) + rotating refresh token; logout revokes.
+- FR10: Clerk manages sign-in, MFA and sessions; the API verifies Clerk session JWTs.
 - FR11: All admin actions are written to an audit log.
 
 ## 8. Non-Functional Requirements
@@ -60,23 +60,25 @@ Small to mid-size private groups (company teams, communities, project groups) ma
 | Accessibility | WCAG 2.1 AA |
 
 ## 9. Pages / Screens
-**Public:** `/login` (user), `/admin/login`
-**User:** `/` Dashboard, `/chats`, `/chats/[id]`, `/groups/new`, `/broadcasts`, `/settings`
+**Public:** `/` Landing page, `/login`, `/signup`, `/admin/login`
+**User:** `/dashboard` Dashboard, `/chats`, `/chats/[id]`, `/groups/new`, `/broadcasts`, `/settings`
 **Admin:** `/admin` Dashboard, `/admin/users`, `/admin/users/new`, `/admin/audit`, `/admin/security`
 
 ## 10. User Journeys
-- **Onboarding:** Admin creates user → sees code once → shares it out-of-band → user logs in → browser generates keypair → public key uploaded → ready.
+- **Onboarding:** User signs up and verifies email → account is pending → admin approves → user signs in → browser generates keypair → public key uploaded → ready.
 - **Send message:** open chat → type → encrypt locally → WS send → server stores ciphertext + `expires_at` → fan-out → recipients decrypt.
 - **Expiry:** message shows countdown; at 10 h it disappears everywhere.
 - **Lost device:** admin regenerates code → user logs in on new device → new keypair (old messages already expired or unreadable).
 
 ## 11. Authentication Requirements
-- User: username + 10-hex code → JWT access (10 min, memory only) + refresh (7 days, httpOnly Secure SameSite=Strict cookie, rotated, reuse-detected).
-- Admin: separate login with admin code (≥ 24 chars, generated by bootstrap CLI) + mandatory TOTP.
-- Rate limiting + progressive lockout on all login endpoints.
+- Clerk handles user/admin sign-up, sign-in, email verification, MFA and session rotation.
+- User sign-up is available publicly, but new accounts stay pending and cannot use REST chat endpoints or WebSockets until approved.
+- Clerk `public_metadata.role` is server-managed: `user` after admin approval and `admin` only through a trusted bootstrap/admin process. Client-set metadata is never trusted.
+- Require verified email for users and MFA for admins. The API validates Clerk JWT signature (RS256/JWKS), issuer, expiry, authorized party and session state.
+- Pending and disabled accounts receive generic, explicit access-denied states; admin approval/rejection actions are audited.
 
 ## 12. Admin Requirements
-Create / disable / enable / delete / reset-code users; list sessions and revoke; view audit log; create broadcast channels; rotate admin code.
+Review and approve/reject pending users; disable/enable/delete users; reset device keys; revoke sessions; view audit log; create broadcast channels.
 
 ## 13. API Requirements
 REST (`/api/v1`) for auth, users, conversations, history; WebSocket (`/ws`) for real-time. Full spec in System_Design.md.
@@ -91,10 +93,9 @@ None for MVP. Neon (Postgres) only. Optional Redis for multi-instance fan-out (l
 Forward secrecy (Double Ratchet), encrypted attachments with TTL, read receipts, typing indicators, multi-device key sync, mobile app, per-conversation custom TTL.
 
 ## 17. Out of Scope (MVP)
-Public registration, password reset by email, voice/video calls, file attachments, message editing, search, server-side message moderation, federation.
+Public access without approval, voice/video calls, file attachments, message editing, search, server-side message moderation, federation.
 
 ## 18. Open Questions / Assumptions
-1. **"One to many"** assumed = group chat + admin-controlled broadcast channel. Confirm.
-2. **Who creates groups?** Assumed: any user; broadcast channels: admin only.
-3. **10-hex-digit code = 40 bits.** Safe only with strict rate limiting + lockout + Argon2id. Recommended optional hardening: force user to set a passphrase on first login. Confirm.
-4. **"Non-hackable"** is not achievable in absolute terms; we target defense-in-depth (see rules.md §Security).
+1. **"One to many"** assumed = group chat + admin-controlled broadcast channel.
+2. **Who creates groups?** Assumed: any approved user; broadcast channels: admin only.
+3. **"Non-hackable"** is not achievable in absolute terms; we target defense-in-depth (see rules.md §Security).

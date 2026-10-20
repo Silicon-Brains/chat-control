@@ -3,7 +3,7 @@ import { LayoutDashboard, Megaphone, MessageSquare, ScrollText, Settings, Shield
 export interface NavItem { href: string; label: string; icon: LucideIcon }
 
 export const userNav: NavItem[] = [
-  { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/chats', label: 'Chats', icon: MessageSquare },
   { href: '/groups', label: 'Groups', icon: Users },
   { href: '/broadcasts', label: 'Broadcasts', icon: Megaphone },
@@ -18,4 +18,4 @@ export const adminNav: NavItem[] = [
 ];
 
 export const isActive = (pathname: string, href: string) =>
-  href === '/' || href === '/admin' ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+  href === '/admin' ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);

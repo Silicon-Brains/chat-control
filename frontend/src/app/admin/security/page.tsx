@@ -3,15 +3,15 @@ import { Topbar } from '@/components/layout/topbar';
 import { CardHeader, GlassCard } from '@/components/ui/glass-card';
 
 const POSTURE = [
-  ['Admin sign-in requires a TOTP code', 'Sign-in uses a long admin code plus an authenticator app.'],
-  ['Login codes are hashed', 'Codes are shown once and never stored in readable form.'],
+  ['Admin sign-in uses Clerk MFA', 'Clerk manages admin sessions and multifactor authentication.'],
+  ['New accounts need approval', 'Clerk sign-ups are pending and cannot access chats until approved by an admin.'],
   ['Messages are end-to-end encrypted', 'The server stores ciphertext only and cannot read content.'],
   ['Messages delete after 10 hours', 'Expired rows are removed within a minute and never returned.'],
 ];
 
 const LIMITS = [
   'The server can see who talks to whom, when, and message sizes.',
-  'Resetting a user’s code lets them re-enrol with a new key; contacts see a changed fingerprint.',
+  'Resetting a user’s device key requires re-enrolment; contacts see a changed fingerprint.',
   'Keys are static per device (no forward secrecy); the 10-hour expiry limits exposure.',
 ];
 

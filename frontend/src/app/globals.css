@@ -30,6 +30,7 @@
 
 @media (max-width: 639px) {
   .glass { backdrop-filter: blur(12px) saturate(140%); }
+  body { background-attachment: scroll; }
 }
 
 @media (prefers-reduced-motion: reduce) {

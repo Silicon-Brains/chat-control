@@ -31,11 +31,11 @@
 
 ## 6. Security Rules (critical)
 **DO**
-- Hash codes with **Argon2id**; compare in constant time.
-- Generate codes with `secrets` (CSPRNG): `secrets.token_hex(5)` → 10 hex chars.
-- Show the user code **once**; never log, store, or email it in plaintext.
-- Rate-limit: login 5 attempts / 15 min per username **and** per IP; progressive lockout; generic failure messages.
-- Mandatory TOTP for admin; admin code ≥ 24 chars.
+- Let Clerk handle passwords, email verification, MFA and sessions; verify Clerk JWTs (RS256/JWKS, issuer, expiry, authorized party).
+- Allow direct Clerk sign-up, but create local accounts as `pending` and deny API/WebSocket access until explicit admin approval.
+- Set Clerk public role metadata only from trusted backend/admin bootstrap paths; never trust client-supplied role claims.
+- Require verified email for users and MFA for admins.
+- Audit registration, approval, rejection, disable/enable and delete actions.
 - Encrypt in browser; private key `extractable: false`; store only in IndexedDB.
 - Validate membership on every REST call **and** every WS event.
 - Set headers: strict CSP (no inline scripts, nonces), HSTS, `X-Content-Type-Options`, `Referrer-Policy: no-referrer`, `frame-ancestors 'none'`.
@@ -53,14 +53,16 @@
 - Don't claim "unhackable" — state threat model honestly.
 
 ## 7. Authentication Rules
-- Access JWT: 10 min, memory only, `aud`/`iss` checked, asymmetric or ≥256-bit secret.
-- Refresh: 7 days, rotated every use, hashed in DB, reuse ⇒ revoke family.
-- WS: one-time ticket (30 s TTL), consumed on connect.
-- Reset-code ⇒ revoke all sessions + clear public key.
+- Clerk owns credentials and web sessions. The API accepts only verified Clerk session JWTs.
+- Pending or disabled local accounts cannot use REST or WebSocket endpoints.
+- Approval writes `public_metadata.role=user` through Clerk's Backend API and changes the local account to active; approval is auditable.
+- `public_metadata.role=admin` is granted only through a trusted bootstrap/admin operation.
+- WS: exchange an approved Clerk session for a one-time ticket (30 s TTL), consumed on connect.
+- Reset-device-key ⇒ revoke sessions as appropriate and clear the public key.
 
 ## 8. Environment Variables
 - `.env` never committed; `.env.example` lists names only.
-- Required: `DATABASE_URL`, `DATABASE_URL_DIRECT`, `JWT_SECRET`, `TOTP_ENC_KEY`, `CODE_PEPPER`, `ALLOWED_ORIGINS`, `ENV`.
+- Required: `DATABASE_URL`, `DATABASE_URL_DIRECT`, `CLERK_SECRET_KEY`, `CLERK_ISSUER`, `ALLOWED_ORIGINS`, `ENV`.
 - Frontend exposes only `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`.
 - No secret may appear in `NEXT_PUBLIC_*`.
 
@@ -70,7 +72,7 @@
 
 ## 10. Validation
 - Pydantic v2 `extra="forbid"` on all inputs; Zod on frontend forms.
-- Usernames: `^[a-z0-9_]{3,24}$`. Hex code: `^[0-9a-f]{10}$`.
+- Usernames: `^[a-z0-9_]{3,24}$` (derived from Clerk profile and uniquified by the server).
 
 ## 11. Responsive & Accessibility
 - Mobile-first; breakpoints per design.md.
@@ -91,7 +93,7 @@
 - WS payloads compact; batch receipts.
 
 ## 15. Testing
-- Backend: pytest + httpx; cover auth, authz, rate-limit, purge, WS membership.
+- Backend: pytest + httpx; cover Clerk token validation, pending-to-approved lifecycle, authz, purge, WS membership.
 - Frontend: Vitest for crypto utils (round-trip, tamper detection); Playwright for login → send → expiry flows.
 - Security tests: IDOR checks, brute-force lockout, token reuse, CSP presence.
 - Minimum 80% coverage on `services/` and `lib/crypto/`.

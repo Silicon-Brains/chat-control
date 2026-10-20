@@ -12,6 +12,7 @@ class UserRole(enum.StrEnum):
 
 
 class UserStatus(enum.StrEnum):
+    PENDING = "pending"
     ACTIVE = "active"
     DISABLED = "disabled"
 

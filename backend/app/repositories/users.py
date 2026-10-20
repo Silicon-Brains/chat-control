@@ -78,6 +78,7 @@ class UserRepository:
         ).all()
         by_status = {str(status): count for status, count in rows}
         return {
+            "pending": by_status.get("pending", 0),
             "active": by_status.get("active", 0),
             "disabled": by_status.get("disabled", 0),
             "total": sum(by_status.values()),

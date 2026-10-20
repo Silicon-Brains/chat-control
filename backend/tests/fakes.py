@@ -54,6 +54,7 @@ class FakeClerk:
         username: str | None = None,
         first_name: str | None = None,
         last_name: str | None = None,
+        email_verified: bool = True,
     ) -> str:
         cid = "user_" + uuid.uuid4().hex[:24]
         self.users[cid] = dict(
@@ -63,6 +64,7 @@ class FakeClerk:
             username=username,
             first_name=first_name,
             last_name=last_name,
+            email_verified=email_verified,
             banned=False,
             locked=False,
         )
@@ -79,7 +81,13 @@ class FakeClerk:
             "locked": u["locked"],
             "public_metadata": {"role": u["role"]} if u["role"] else {},
             "primary_email_address_id": "idn_1",
-            "email_addresses": [{"id": "idn_1", "email_address": u["email"]}],
+            "email_addresses": [
+                {
+                    "id": "idn_1",
+                    "email_address": u["email"],
+                    "verification": {"status": "verified" if u["email_verified"] else "unverified"},
+                }
+            ],
         }
 
     # ---- ClerkApi
@@ -96,6 +104,7 @@ class FakeClerk:
         return None
 
     async def set_user_role(self, clerk_user_id: str, role: str) -> None:
+        self.calls.append(("set_role", clerk_user_id))
         self.users[clerk_user_id]["role"] = role
 
     async def ban_user(self, clerk_user_id: str) -> None:

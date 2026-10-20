@@ -8,7 +8,7 @@
 
 ## 2. ER Overview
 ```
-users ─┬─< refresh_tokens
+users ─┬─< ws_tickets
        ├─< conversation_members >─ conversations ─< messages
        ├─< conversation_keys (per member, per version)
        └─< audit_logs (actor)
@@ -19,28 +19,23 @@ users ─┬─< refresh_tokens
 ```
 users
  ├── id               uuid PK
- ├── username         citext UNIQUE NOT NULL
+ ├── username         text UNIQUE NOT NULL
  ├── display_name     text NOT NULL
  ├── role             enum('admin','user') NOT NULL DEFAULT 'user'
- ├── code_hash        text NOT NULL            -- Argon2id (user hex code / admin code)
- ├── totp_secret_enc  bytea NULL               -- admin only, AES-GCM encrypted with server key
+ ├── clerk_user_id    text UNIQUE NOT NULL
+ ├── email            text NULL
  ├── public_key       bytea NULL               -- ECDH P-256 (SPKI), set on first login
  ├── key_fingerprint  text NULL
- ├── status           enum('active','disabled') NOT NULL DEFAULT 'active'
- ├── failed_attempts  int NOT NULL DEFAULT 0
- ├── locked_until     timestamptz NULL
+ ├── status           enum('pending','active','disabled') NOT NULL DEFAULT 'pending'
+ ├── synced_at        timestamptz NULL          -- last role/ban sync from Clerk
  ├── created_by       uuid → users.id NULL
  ├── created_at       timestamptz NOT NULL DEFAULT now()
  └── last_login_at    timestamptz NULL
 
-refresh_tokens
- ├── id           uuid PK
+ws_tickets
+ ├── token_hash   bytea PK                      -- SHA-256 of one-time ticket
  ├── user_id      uuid → users.id ON DELETE CASCADE
- ├── family_id    uuid NOT NULL                -- reuse detection
- ├── token_hash   bytea UNIQUE NOT NULL        -- SHA-256
- ├── user_agent   text, ip inet
  ├── expires_at   timestamptz NOT NULL
- ├── revoked_at   timestamptz NULL
  └── created_at   timestamptz DEFAULT now()
 
 conversations
@@ -82,7 +77,7 @@ messages
 audit_logs
  ├── id          bigserial PK
  ├── actor_id    uuid → users.id NULL
- ├── action      text NOT NULL        -- user.create, user.reset_code, login.fail …
+ ├── action      text NOT NULL        -- user.provision, user.approve, user.disable …
  ├── target_id   uuid NULL
  ├── ip          inet, meta jsonb
  └── created_at  timestamptz DEFAULT now()    -- audit logs hold no message content
@@ -100,7 +95,7 @@ audit_logs
 | `messages (conversation_id, created_at DESC, id)` | history pagination |
 | `messages (expires_at)` | purge job |
 | `conversation_members (user_id)` | list my chats |
-| `refresh_tokens (user_id)`, `(token_hash)` unique | session ops |
+| `ws_tickets (expires_at)` | purge expired one-time tickets |
 | `audit_logs (created_at DESC)` | admin view |
 | `users (username)` unique | login |
 
@@ -122,7 +117,7 @@ JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.us
 WHERE m.expires_at > now() AND m.created_at > coalesce(cm.last_read_at,'-infinity')
   AND m.sender_id <> $1 GROUP BY 1;
 ```
-Also purge: expired `refresh_tokens`, superseded `conversation_keys` older than 10 h.
+Also purge: expired `ws_tickets`, superseded `conversation_keys` older than 10 h.
 
 ## 7. Seed Data
 - 1 admin (via CLI only, never SQL seed in prod).
@@ -130,7 +125,8 @@ Also purge: expired `refresh_tokens`, superseded `conversation_keys` older than 
 
 ## 8. Database Security
 - Least-privilege DB role for app (no DDL); separate migration role.
-- Only ciphertext + metadata stored; no plaintext, no private keys, no raw codes/tokens.
-- Secrets (DB URL, TOTP encryption key, JWT keys) from env/secret manager.
+- Only ciphertext + metadata stored; no plaintext, no private keys, no Clerk session tokens.
+- Public Clerk sign-ups are stored as `pending`; only an admin approval changes the Clerk role and local status to `active`.
+- Secrets (DB URL, Clerk secret key) from env/secret manager.
 - Enable Neon IP allow-list if hosting is static; backups follow the same 10 h rule for message content (short PITR window — see System_Design §10).
 - Row access always through service layer with membership checks.

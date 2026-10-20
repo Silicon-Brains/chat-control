@@ -36,8 +36,8 @@ class User(Base):
     status: Mapped[UserStatus] = mapped_column(
         pg_enum(UserStatus, "user_status"),
         nullable=False,
-        default=UserStatus.ACTIVE,
-        server_default=UserStatus.ACTIVE.value,
+        default=UserStatus.PENDING,
+        server_default=UserStatus.PENDING.value,
     )
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # last mirror of Clerk state
     created_by: Mapped[uuid.UUID | None] = mapped_column(

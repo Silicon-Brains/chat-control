@@ -92,6 +92,7 @@ class AuditPage(CamelModel):
 
 class AdminStats(CamelModel):
     users_total: int
+    users_pending: int
     users_active: int
     users_disabled: int
     live_messages: int

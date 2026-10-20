@@ -15,7 +15,7 @@ import { formatCountdown, formatRelative } from '@/lib/utils';
 import { useChatStore } from '@/stores/chat';
 import { useSession } from '@/stores/session';
 
-export default function DashboardPage() {
+export default function DashboardHomePage() {
   const me = useSession((s) => s.user)!;
   const fingerprint = useSession((s) => s.fingerprint);
   const { data, isLoading } = useConversations();

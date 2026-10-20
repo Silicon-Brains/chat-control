@@ -1,6 +1,7 @@
 import { api } from './client';
 import type {
   AdminUser,
+  AdminStats,
   AuditEntry,
   Conversation,
   ConversationType,
@@ -26,6 +27,7 @@ export const authApi = {
 };
 
 export const usersApi = {
+  me: () => api<User>('/users/me'),
   directory: () => api<DirectoryUser[]>('/users'),
   registerKey: (publicKey: string) => api('/users/me/key', { method: 'PUT', body: { publicKey } }),
 };
@@ -55,7 +57,11 @@ export interface CreatedUser {
 }
 
 export const adminApi = {
-  users: () => api<AdminUser[]>('/admin/users'),
+  users: (cursor?: string | null) =>
+    api<Page<AdminUser> | AdminUser[]>('/admin/users', { query: { limit: 100, cursor: cursor ?? undefined } }),
+  stats: () => api<AdminStats>('/admin/stats'),
+  approveUser: (id: string) => api<AdminUser>(`/admin/users/${id}/approve`, { method: 'POST' }),
+  resetKey: (id: string) => api(`/admin/users/${id}/reset-key`, { method: 'POST' }),
   createUser: (body: { username: string; displayName: string }) =>
     api<CreatedUser>('/admin/users', { method: 'POST', body }),
   resetCode: (id: string) => api<{ loginCode: string }>(`/admin/users/${id}/reset-code`, { method: 'POST' }),

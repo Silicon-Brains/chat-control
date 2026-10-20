@@ -43,6 +43,10 @@ async function seed() {
     id: 'u-admin', username: 'admin', displayName: 'Admin', role: 'admin', status: 'active',
     publicKey: null, keyFingerprint: null, createdAt: new Date().toISOString(), lastLoginAt: null,
   });
+  users.push({
+    id: 'u-pending', username: 'new_member', displayName: 'New Member', role: 'user', status: 'pending',
+    publicKey: null, keyFingerprint: null, createdAt: new Date().toISOString(), lastLoginAt: null,
+  });
 }
 
 const toUser = (u: MockUser): User => ({
@@ -151,7 +155,28 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
   if (/^\/conversations\/[^/]+\/read$/.test(path)) return out();
 
   // ---- admin ----
-  if (path === '/admin/users' && method === 'GET') { requireAdmin(); return out(users.map(({ publicKey: _p, ...u }) => u)); }
+  if (path === '/admin/users' && method === 'GET') {
+    requireAdmin();
+    return out(users.map((u) => {
+      const { publicKey, ...safe } = u;
+      void publicKey;
+      return safe;
+    }));
+  }
+  if (path === '/admin/stats' && method === 'GET') {
+    requireAdmin();
+    return out({
+      usersTotal: users.filter((u) => u.role === 'user').length,
+      usersPending: users.filter((u) => u.role === 'user' && u.status === 'pending').length,
+      usersActive: users.filter((u) => u.role === 'user' && u.status === 'active').length,
+      usersDisabled: users.filter((u) => u.role === 'user' && u.status === 'disabled').length,
+      liveMessages: convs.reduce((sum, c) => sum + c.messages.length, 0),
+      wsConnections: 0,
+      conversationsTotal: convs.length,
+      lastPurgeAt: null,
+      lastPurgeDeleted: null,
+    });
+  }
   if (path === '/admin/users' && method === 'POST') {
     const admin = requireAdmin();
     if (users.some((u) => u.username === body.username)) fail(409, 'CONFLICT', 'Username taken');
@@ -161,6 +186,19 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
     };
     users.push(u); const c = code(); MOCK_CREDENTIALS.users[u.username] = c; log(admin, 'user.create', u.id);
     return out({ id: u.id, username: u.username, loginCode: c });
+  }
+  if ((m = path.match(/^\/admin\/users\/([^/]+)\/approve$/)) && method === 'POST') {
+    const admin = requireAdmin(); const u = users.find((x) => x.id === m![1]);
+    if (!u) fail(404, 'NOT_FOUND', 'Not found');
+    if (u!.status !== 'pending') fail(409, 'USER_NOT_PENDING', 'User is not pending approval');
+    u!.status = 'active'; log(admin, 'user.approve', u!.id);
+    return out(u);
+  }
+  if ((m = path.match(/^\/admin\/users\/([^/]+)\/reset-key$/)) && method === 'POST') {
+    const admin = requireAdmin(); const u = users.find((x) => x.id === m![1]);
+    if (!u) fail(404, 'NOT_FOUND', 'Not found');
+    u!.publicKey = null; u!.keyFingerprint = null; log(admin, 'user.reset_key', u!.id);
+    return out();
   }
   if ((m = path.match(/^\/admin\/users\/([^/]+)\/reset-code$/))) {
     const admin = requireAdmin(); const u = users.find((x) => x.id === m![1]);

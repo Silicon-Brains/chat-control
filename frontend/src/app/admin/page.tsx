@@ -1,6 +1,6 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
-import { ShieldAlert, UserCheck, UserX, Users } from 'lucide-react';
+import { Clock3, ShieldAlert, UserCheck, UserX, Users } from 'lucide-react';
 import { Topbar } from '@/components/layout/topbar';
 import { CardHeader, GlassCard } from '@/components/ui/glass-card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -9,20 +9,20 @@ import { adminApi } from '@/lib/api/endpoints';
 import { formatRelative } from '@/lib/utils';
 
 export default function AdminDashboard() {
-  const users = useQuery({ queryKey: ['admin', 'users'], queryFn: adminApi.users });
+  const stats = useQuery({ queryKey: ['admin', 'stats'], queryFn: adminApi.stats });
   const audit = useQuery({ queryKey: ['admin', 'audit', 'recent'], queryFn: () => adminApi.audit() });
 
-  const list = users.data ?? [];
   const entries = audit.data?.items ?? [];
   const failed = entries.filter((e) => e.action === 'login.fail').length;
 
   return (
     <>
       <Topbar admin title="Admin dashboard" greeting="Workspace overview" />
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile icon={Users} label="Total users" value={users.isLoading ? '…' : list.length} />
-        <StatTile icon={UserCheck} label="Active" value={users.isLoading ? '…' : list.filter((u) => u.status === 'active').length} accent="purple" />
-        <StatTile icon={UserX} label="Disabled" value={users.isLoading ? '…' : list.filter((u) => u.status === 'disabled').length} accent="orange" />
+      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-5">
+        <StatTile icon={Users} label="Total users" value={stats.isLoading ? '…' : stats.data?.usersTotal ?? 0} />
+        <StatTile icon={UserCheck} label="Active" value={stats.isLoading ? '…' : stats.data?.usersActive ?? 0} accent="purple" />
+        <StatTile icon={Clock3} label="Awaiting approval" value={stats.isLoading ? '…' : stats.data?.usersPending ?? 0} accent="orange" />
+        <StatTile icon={UserX} label="Disabled" value={stats.isLoading ? '…' : stats.data?.usersDisabled ?? 0} accent="orange" />
         <StatTile icon={ShieldAlert} label="Failed sign-ins (recent)" value={audit.isLoading ? '…' : failed} accent="pink" />
       </div>
       <GlassCard className="mt-5">

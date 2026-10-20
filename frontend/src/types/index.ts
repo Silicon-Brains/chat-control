@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'user';
-export type UserStatus = 'active' | 'disabled';
+export type UserStatus = 'pending' | 'active' | 'disabled';
 export type ConversationType = 'direct' | 'group' | 'broadcast';
 export type MemberRole = 'owner' | 'member' | 'sender';
 
@@ -24,11 +24,24 @@ export interface AdminUser {
   id: string;
   username: string;
   displayName: string;
+  email?: string | null;
   role: Role;
   status: UserStatus;
   keyFingerprint: string | null;
   createdAt: string;
   lastLoginAt: string | null;
+}
+
+export interface AdminStats {
+  usersTotal: number;
+  usersPending: number;
+  usersActive: number;
+  usersDisabled: number;
+  liveMessages: number;
+  wsConnections: number;
+  conversationsTotal: number;
+  lastPurgeAt: string | null;
+  lastPurgeDeleted: number | null;
 }
 
 export interface AuditEntry {

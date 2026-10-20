@@ -1,6 +1,6 @@
 # VaultChat Backend
 
-Invite-only, end-to-end-encrypted chat API. **FastAPI + native WebSockets + Neon Postgres + Clerk authentication.**
+Admin-approved, end-to-end-encrypted chat API. **FastAPI + native WebSockets + Neon Postgres + Clerk authentication.**
 The server stores **ciphertext and wrapped keys only**; messages hard-expire 10 h after sending.
 
 ```
@@ -27,9 +27,10 @@ Browser (Clerk SDK) ──session JWT (Authorization: Bearer)──► API
                                         ▲
 Clerk ── webhooks (user.created/updated/deleted, Svix-signed) ── instant ban/role/delete sync
 ```
-* **No passwords, codes, TOTP, refresh tokens or cookies** in this API any more - Clerk owns sign-in, MFA and sessions.
-* **Invite-only**: admins call `POST /admin/invitations`; the API stamps `public_metadata.role = "user"` on the Clerk invitation.
-  A Clerk user **without** a valid `role` is refused (`403 NOT_INVITED`) and never provisioned, even if public sign-up is accidentally enabled in the Clerk dashboard.
+* **No passwords, login codes, TOTP secrets, refresh tokens or session cookies** are managed by this API - Clerk owns sign-in, MFA and sessions.
+* **Self-service sign-up with approval**: users create Clerk accounts directly and verify their email. Accounts without a server-assigned role are mirrored as `pending`; all protected REST and WebSocket access returns `403 APPROVAL_PENDING` until an admin approves them.
+* **Approval**: `POST /admin/users/{id}/approve` sets the Clerk `public_metadata.role = "user"`, activates the local account and writes an audit record. The client cannot set this role.
+* Admin invitations remain optional; invitations created by this API are stamped with `public_metadata.role = "user"` and are therefore approved on registration.
 * **Admins** are Clerk users with `public_metadata.role = "admin"`. Admin endpoints re-verify role/ban against Clerk when the mirror is >60 s old.
 * **Ban/disable**: `PATCH /admin/users/{id} {"status":"disabled"}` bans in Clerk, revokes their Clerk sessions, and force-closes their WebSockets; the local mirror blocks them immediately (`403 ACCOUNT_DISABLED`).
 * Clerk session tokens live ~60 s - the frontend must call `getToken()` for every request (the Clerk SDK does this and caches for you).
@@ -48,7 +49,7 @@ uvicorn app.asgi:app --reload --no-access-log
 
 ### Clerk dashboard setup (once)
 1. **API keys** → `CLERK_SECRET_KEY`. **Frontend API URL** (Domains page) → `CLERK_ISSUER`.
-2. **User & authentication → Restrictions → Sign-up mode: "Restricted"** (invitation-only). The API enforces this independently, but keep the dashboard closed too.
+2. Allow public sign-up, require verified email, and enable MFA for admin accounts. The API independently keeps every new account pending until admin approval.
 3. **Webhooks** → add endpoint `https://<api-host>/api/v1/webhooks/clerk`, subscribe to `user.created`, `user.updated`, `user.deleted`; copy the signing secret → `CLERK_WEBHOOK_SECRET`.
 4. Optional but recommended: require MFA for everyone (Clerk → Multi-factor) - this replaces the old admin TOTP.
 5. `python -m app.cli.bootstrap_admin --email you@company.com` promotes that Clerk user to admin (or sends an admin invitation if they have no account yet). More admins: Clerk → Users → *Metadata → Public* → `{"role": "admin"}`.
@@ -59,7 +60,7 @@ uvicorn app.asgi:app --reload --no-access-log
 * **Set Neon's PITR window as short as your plan allows** - backups hold ciphertext beyond the 10 h TTL.
 
 ### Migrating from the hex-code version
-Migration `0002` **deletes all legacy users, conversations and messages** (hex-code accounts can't be mapped to Clerk users), drops `refresh_tokens` and the credential columns, and adds `clerk_user_id`, `email`, `synced_at`. Back up first if you have live data; then re-invite your users.
+Migration `0002` **deletes all legacy users, conversations and messages** (hex-code accounts can't be mapped to Clerk users), drops `refresh_tokens` and the credential columns, and adds `clerk_user_id`, `email`, `synced_at`. Migration `0003` adds the pending-approval state. Back up first if you have live data; users must register again and await approval.
 
 ## Tests
 ```bash
@@ -73,7 +74,7 @@ Integration tests use an in-memory Clerk double and **real RS256-signed session 
 |---|---|
 | Session | `POST /auth/ws-ticket` |
 | Me / directory | `GET /users/me` · `PUT /users/me/key` · `GET /users?q=&cursor=` |
-| Admin | `POST/GET /admin/invitations` · `DELETE /admin/invitations/{id}` · `GET /admin/users` · `PATCH /admin/users/{id}` (status) · `POST …/reset-key` · `POST …/revoke-sessions` · `DELETE /admin/users/{id}` · `GET /admin/audit` · `GET /admin/stats` · `GET /admin/broadcasts` |
+| Admin | `POST/GET /admin/invitations` · `DELETE /admin/invitations/{id}` · `GET /admin/users` · `POST /admin/users/{id}/approve` · `PATCH /admin/users/{id}` (status) · `POST …/reset-key` · `POST …/revoke-sessions` · `DELETE /admin/users/{id}` · `GET /admin/audit` · `GET /admin/stats` · `GET /admin/broadcasts` |
 | Conversations | `POST/GET /conversations` · `GET /{id}` · `GET /{id}/keys` · `POST /{id}/members` · `DELETE /{id}/members/{uid}` · `POST /{id}/keys/rotate` · `POST /{id}/keys/grant` · `POST /{id}/read` · `GET /{id}/messages?cursor=` |
 | Webhook | `POST /webhooks/clerk` (Svix-signed, not in OpenAPI) |
 | Health | `GET /healthz` (DB check) · `GET /livez` |
@@ -92,7 +93,7 @@ Close codes: 4401 bad/used ticket · 4403 account disabled · 4408 idle · 4429 
 
 ## Security design (as implemented)
 * **Tokens**: RS256 only, signature + issuer + expiry/nbf verified; `azp` must be an allowed origin; pending sessions rejected; `alg=none`/HS256 confusion tests included. JWKS cached 1 h (`503 AUTH_UNAVAILABLE` if Clerk is unreachable and no key is cached).
-* **Provisioning**: invite-only enforced server-side; usernames derived and made unique; races on first login handled.
+* **Provisioning**: public registrations are pending until admin approval; usernames are derived and made unique; first-login races are handled.
 * **Webhooks**: Svix HMAC-SHA256, constant-time compare, 5-minute replay window; endpoint disabled (503) without a secret.
 * **Authorization**: membership checked on every call and WS event; non-members get the same answer as for missing resources; broadcast posting needs owner/sender; `sender_id`/`expires_at`/roles never client-supplied.
 * **Retention**: DB-assigned `expires_at`, filtered on every read, purge at startup and every 60 s (batched, `SKIP LOCKED`), plus cleanup of tickets, superseded keys and >90-day audit rows.

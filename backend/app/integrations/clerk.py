@@ -93,6 +93,7 @@ class ClerkUser:
     role: str | None  # public_metadata.role, only "user"/"admin" are meaningful
     banned: bool
     locked: bool
+    email_verified: bool = True
 
     @property
     def display_name(self) -> str:
@@ -103,8 +104,11 @@ class ClerkUser:
     def from_api(cls, d: dict[str, Any]) -> ClerkUser:
         primary = d.get("primary_email_address_id")
         emails = d.get("email_addresses") or []
-        email = next((e.get("email_address") for e in emails if e.get("id") == primary), None) or (
-            emails[0].get("email_address") if emails else None
+        primary_record = next((e for e in emails if e.get("id") == primary), None)
+        email_record = primary_record or (emails[0] if emails else None)
+        email = email_record.get("email_address") if email_record else None
+        email_verified = bool(
+            email_record and (email_record.get("verification") or {}).get("status") == "verified"
         )
         role = (d.get("public_metadata") or {}).get("role")
         return cls(
@@ -116,6 +120,7 @@ class ClerkUser:
             role=role if role in VALID_ROLES else None,
             banned=bool(d.get("banned")),
             locked=bool(d.get("locked")),
+            email_verified=email_verified,
         )
 
 

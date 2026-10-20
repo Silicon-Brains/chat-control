@@ -2,7 +2,6 @@ import { ClerkProvider } from '@clerk/nextjs';
 import { env } from '@/lib/env';
 
 /**
- * Wraps ONLY the admin routes, so user pages never load Clerk's JS.
  * Server component: Clerk reads the CSP nonce from the request (`dynamic`).
  */
 export function ClerkShell({ children }: { children: React.ReactNode }) {
@@ -10,9 +9,9 @@ export function ClerkShell({ children }: { children: React.ReactNode }) {
   return (
     <ClerkProvider
       dynamic
-      afterSignOutUrl="/admin/login"
-      signInUrl="/admin/login"
-      signUpUrl="/admin/signup"
+      afterSignOutUrl="/login"
+      signInUrl="/login"
+      signUpUrl="/signup"
       appearance={{
         variables: {
           colorPrimary: '#3E8C8F',

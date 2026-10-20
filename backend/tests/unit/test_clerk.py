@@ -18,10 +18,14 @@ def test_clerk_user_mapping() -> None:
             "banned": True,
             "public_metadata": {"role": "admin"},
             "primary_email_address_id": "e2",
-            "email_addresses": [{"id": "e1", "email_address": "old@x.io"}, {"id": "e2", "email_address": "ada@x.io"}],
+            "email_addresses": [
+                {"id": "e1", "email_address": "old@x.io"},
+                {"id": "e2", "email_address": "ada@x.io", "verification": {"status": "verified"}},
+            ],
         }
     )
     assert (cu.email, cu.role, cu.banned, cu.display_name) == ("ada@x.io", "admin", True, "Ada Lovelace")
+    assert cu.email_verified
     assert (
         ClerkUser.from_api({"id": "u", "public_metadata": {"role": "root"}}).role is None
     )  # unknown role = not invited

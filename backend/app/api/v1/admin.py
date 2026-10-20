@@ -45,7 +45,7 @@ def _user_out(u) -> AdminUserOut:  # type: ignore[no-untyped-def]
     )
 
 
-# ------------------------------------------------------------------ invitations (invite-only sign-up)
+# ---------------------------------------------------------- optional invitations
 @router.post("/invitations", response_model=InvitationOut, status_code=status.HTTP_201_CREATED)
 async def invite(
     body: InviteRequest, admin: AdminUser, session: SessionDep, container: ContainerDep, ip: ClientIp
@@ -79,6 +79,13 @@ async def list_users(
 ) -> AdminUserPage:
     rows, nxt = await AdminService(session, container).list_users(q=q, status=status_, cursor=cursor, limit=limit)
     return AdminUserPage(items=[_user_out(u) for u in rows], next_cursor=nxt)
+
+
+@router.post("/users/{user_id}/approve", response_model=AdminUserOut)
+async def approve_user(
+    user_id: uuid.UUID, admin: AdminUser, session: SessionDep, container: ContainerDep, ip: ClientIp
+) -> AdminUserOut:
+    return _user_out(await AdminService(session, container).approve_user(admin, user_id, ip=ip))
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserOut)

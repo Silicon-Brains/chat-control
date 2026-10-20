@@ -9,7 +9,7 @@ export default function AdminLoginPage() {
   if (env.mock) return <LoginForm mode="admin" />; // dev-only fake backend
   return (
     <main className="grid min-h-dvh place-items-center p-4">
-      <SignIn path="/admin/login" routing="path" signUpUrl="/admin/signup" fallbackRedirectUrl="/admin" />
+      <SignIn path="/admin/login" routing="path" signUpUrl="/signup" fallbackRedirectUrl="/admin" />
     </main>
   );
 }

@@ -2,9 +2,9 @@
 
 ## Project Context
 - **Project name:** VaultChat (placeholder)
-- **One-line description:** Invite-only, end-to-end encrypted chat with admin-controlled accounts and 10-hour auto-expiring messages.
+- **One-line description:** End-to-end encrypted chat with Clerk self-sign-up, admin-approved access and 10-hour auto-expiring messages.
 - **Target users:** Private teams/communities managed by admins.
-- **Core features:** Admin-only user creation with hex login code; 1:1, group and broadcast chat; E2EE; 10 h auto-clear.
+- **Core features:** Clerk self-sign-up with admin approval; 1:1, group and broadcast chat; E2EE; 10 h auto-clear.
 - **Expected scale (assumed):** ≤ 5,000 users, ≤ 1,000 concurrent WebSockets, ≤ 50 msg/s peak, ≤ ~2 M live message rows (10 h window).
 - **Tech stack:** Next.js 15 + Tailwind CSS; FastAPI + native WebSockets; Neon Postgres.
 - **Constraints:** Small team, security-first, low latency, no plaintext on server.
@@ -12,7 +12,7 @@
 ## 1. Overview
 **Purpose:** Private, closed, ephemeral messaging where the server cannot read content.
 **Goals:** closed membership; E2EE; hard 10 h retention; real-time (<300 ms p95); glass/3D UI.
-**Non-goals:** public sign-up, attachments, calls, search, message editing, forward secrecy (MVP), moderation of content (impossible under E2EE).
+**Non-goals:** application access without approval, attachments, calls, search, message editing, forward secrecy (MVP), moderation of content (impossible under E2EE).
 
 ## 2. Requirements
 **Functional:** see PRD §7.
@@ -21,15 +21,15 @@
 |---|---|
 | Latency | p95 send→receive < 300 ms; REST p95 < 150 ms |
 | Availability | 99.5% MVP |
-| Security | ASVS L2; ciphertext-only server; Argon2id; rate-limited auth |
+| Security | ASVS L2; ciphertext-only server; Clerk-verified sessions; approval-gated API access |
 | Scalability | 1k WS/instance; horizontal via Redis pub/sub |
 | Retention | Rows deleted ≤ 60 s after `expires_at` |
 
 ## 3. Assumptions & Constraints
 - Single region deployment; Neon in same region as backend.
 - Users have modern browsers with WebCrypto + IndexedDB.
-- Hex code delivered by admin out-of-band (secure channel).
-- Code is 10 hex chars (40 bits) → security relies on rate limiting/lockout + Argon2id; optional passphrase recommended.
+- Users can create Clerk accounts directly; new accounts remain pending until an admin approves them.
+- Clerk handles credentials, email verification, MFA and sessions. The backend alone can set approval roles.
 - One active device key per user (new login on new device rotates key).
 - Admin is trusted to distribute codes but **cannot read messages**.
 
@@ -61,7 +61,7 @@ flowchart LR
 |---|---|---|---|---|
 | Web UI | Pages, state, rendering | REST, WS | Crypto lib | Next.js, Tailwind, Zustand, TanStack Query |
 | Crypto lib | Keygen, wrap/unwrap, encrypt/decrypt | `encrypt(convId, text)` / `decrypt(msg)` | WebCrypto, IndexedDB | TypeScript |
-| Auth service | Login, tokens, lockout, TOTP | `/auth/*`, `/admin/auth/*` | DB, argon2-cffi, PyJWT, pyotp | FastAPI |
+| Auth service | Verify Clerk sessions; mirror identity and approval state | `/auth/ws-ticket`, protected APIs | DB, Clerk JWKS | FastAPI |
 | User admin service | Create/reset/disable users | `/admin/users*` | Auth, audit | FastAPI |
 | Chat service | Conversations, members, history | `/conversations*` | DB | FastAPI |
 | WS hub | Connections, fan-out, per-event authz | `/ws` | Chat service | Starlette WS |
@@ -72,7 +72,7 @@ flowchart LR
 ## 6. Data Design
 ```mermaid
 erDiagram
-  USERS ||--o{ REFRESH_TOKENS : has
+  USERS ||--o{ WS_TICKETS : requests
   USERS ||--o{ CONVERSATION_MEMBERS : joins
   CONVERSATIONS ||--o{ CONVERSATION_MEMBERS : has
   CONVERSATIONS ||--o{ MESSAGES : contains
@@ -87,19 +87,16 @@ erDiagram
 - **Retention:** messages 10 h (DB-enforced default + purge); refresh tokens at expiry; old key versions 10 h after rotation; audit logs 90 days (no content).
 
 ## 7. API Design
+**Current authentication:** Clerk session JWTs are sent as `Authorization: Bearer <Clerk session JWT>`. Legacy local login and refresh-cookie examples in this section are superseded.
 Base `/api/v1`, JSON, versioned by path. Auth: `Authorization: Bearer <access>`; refresh via cookie.
 
-**Create user (admin)**
+**User registration and approval**
 ```http
-POST /api/v1/admin/users
-{ "username": "rahul_01", "displayName": "Rahul" }
-→ 201 { "id": "…", "username": "rahul_01", "loginCode": "a3f09c1b7e" }   // shown once
-```
-**User login**
-```http
-POST /api/v1/auth/login
-{ "username": "rahul_01", "code": "a3f09c1b7e" }
-→ 200 { "accessToken": "…", "user": {…}, "needsKeySetup": true }   // + Set-Cookie refresh
+GET /signup                         # Clerk sign-up and verified email
+GET /api/v1/users/me                # Bearer: Clerk session JWT
+→ 403 { "error": { "code": "APPROVAL_PENDING", … } } until approval
+POST /api/v1/admin/users/{id}/approve
+→ 200 { "status": "active", … }
 ```
 **Register public key**
 ```http
@@ -124,21 +121,23 @@ POST /api/v1/conversations
 Errors: `{ "error": { "code": "RATE_LIMITED", "message": "…" } }`.
 
 ## 8. Key Workflows
-**8.1 Admin creates user → first login**
+**8.1 User signs up → admin approves**
 ```mermaid
 sequenceDiagram
+  actor U as User
   actor A as Admin
+  participant Clerk
   participant API as FastAPI
   participant DB as Neon
-  actor U as User (browser)
-  A->>API: POST /admin/users
-  API->>API: code = secrets.token_hex(5)
-  API->>DB: INSERT user(code_hash=Argon2id(code))
-  API-->>A: loginCode (shown once)
-  A-->>U: share code out-of-band
-  U->>API: POST /auth/login (username, code)
-  API->>DB: verify hash, check lockout
-  API-->>U: access token + refresh cookie
+  U->>Clerk: Sign up and verify email
+  U->>API: GET /users/me (Clerk session JWT)
+  API->>Clerk: Verify identity and fetch role
+  API->>DB: INSERT user(status=pending)
+  API-->>U: 403 APPROVAL_PENDING
+  A->>API: POST /admin/users/{id}/approve
+  API->>Clerk: Set server-managed role=user
+  API->>DB: UPDATE user SET status=active
+  API-->>U: Application access enabled
   U->>U: generate ECDH keypair (non-extractable, IndexedDB)
   U->>API: PUT /users/me/key (public key)
 ```
@@ -178,7 +177,7 @@ sequenceDiagram
 | History reads | Composite index + keyset pagination |
 | Purge cost | Batched deletes, `expires_at` index; optional daily partitions later (drop partition = O(1)) |
 | Neon cold start | Keep-alive ping; pooled endpoint; retry on connect |
-| Auth hashing CPU | Argon2id params tuned (~100 ms); run in threadpool; rate limit protects CPU |
+| Clerk validation | JWKS keys cached; identity sync has bounded TTL; admin role refresh is more frequent |
 
 ## 10. Reliability & Fault Tolerance
 - **WS drops:** client reconnect (backoff+jitter), fetch missed messages by cursor.
@@ -190,24 +189,24 @@ sequenceDiagram
 ## 11. Security
 | Area | Design |
 |---|---|
-| User auth | username + 10-hex code → Argon2id; 5 tries/15 min per user & IP; progressive lockout; generic errors |
-| Admin auth | ≥24-char admin code + TOTP; separate endpoint; optional IP allow-list |
-| Sessions | 10 min JWT (memory) + 7 d rotating refresh cookie (HttpOnly/Secure/Strict), reuse detection |
+| User auth | Clerk session JWT; self-signups stay pending until explicit admin approval |
+| Admin auth | Clerk session JWT with server-managed admin metadata; MFA required |
+| Sessions | Clerk-managed; API validates RS256/JWKS signature, issuer, expiry and authorized party |
 | WS auth | one-time 30 s ticket; per-event membership authz |
 | E2EE | ECDH P-256 (non-extractable) → HKDF → AES-256-GCM; per-conversation key wrapped per member; key rotation on member removal; key fingerprints shown for verification |
 | Transport | TLS 1.2+/HSTS, WSS only |
 | Web | strict CSP, no inline JS, text-only message rendering, CORS allow-list |
-| Secrets | env/secret manager; no secrets in repo; `TOTP_ENC_KEY` encrypts TOTP secrets |
+| Secrets | env/secret manager; no secrets in repo; Clerk secret key stays server-side |
 | Logging | no bodies/tokens/codes; audit log for admin + failed logins |
 | Abuse | message ≤ 8 KB; 20 msg/10 s; max group size (e.g., 200) |
 
 **Threat model (summary)**
 | Threat | Mitigation |
 |---|---|
-| Server/DB compromise | Only ciphertext; no keys in plaintext; hashed codes/tokens |
-| Brute-force hex code | Rate limit + lockout + Argon2id + audit alerts; recommend passphrase |
-| XSS stealing keys | non-extractable keys, strict CSP, in-memory tokens |
-| Malicious/curious admin | Cannot read messages; actions audited. *Can* reset codes (and thus impersonate by re-enrolling) → fingerprint-change warning shown to contacts |
+| Server/DB compromise | Only ciphertext; no keys in plaintext; Clerk owns credentials |
+| Malicious signup | Public registrations have no API or chat access until approved |
+| XSS stealing keys | non-extractable keys, strict CSP, short-lived in-memory Clerk tokens |
+| Malicious/curious admin | Cannot read messages; approvals and key resets are audited. A reset can trigger re-enrolment → fingerprint-change warning shown to contacts |
 | Metadata leakage | Server sees who/when/size; documented limit |
 | Replay/tamper | AES-GCM auth + AAD (conversationId, senderId, keyVersion) |
 | No forward secrecy | Static keys; 10 h TTL limits blast radius; Double Ratchet in future |
@@ -237,15 +236,15 @@ sequenceDiagram
 | Real-time | Raw TCP sockets / Socket.IO / native WS | Native WS | Browser-compatible, no extra layer |
 | E2EE protocol | Signal Double Ratchet / static ECDH + AES-GCM | Static ECDH + AES-GCM | Simpler for MVP; TTL limits exposure; ratchet later |
 | Group keys | Pairwise encrypt per recipient / shared key wrapped per member | Shared key wrapped | O(1) encrypt per message |
-| Login | Hex code only / username+code | username+code | Avoids global code search; per-account lockout |
+| Login | Local credentials / identity provider | Clerk | Managed sessions, MFA and email verification; application access remains approval-gated |
 | Retention | Cron only / TTL index / expires_at + job + filter | expires_at + job + filter | Correctness + cleanup |
 | Fan-out | LISTEN/NOTIFY / Redis | Redis (when scaling) | Works with pooled Neon |
-| Token storage | localStorage / cookie+memory | cookie + memory | XSS resistance |
+| Token storage | localStorage / Clerk session | Clerk-managed session | Managed token lifecycle; API tokens held only as needed |
 
 ## 15. Risks & Open Questions
 | Risk | Impact | Mitigation |
 |---|---|---|
-| 40-bit code guessed | Account takeover | Lockout, rate limits, optional passphrase, longer code option |
+| Malicious signup | Unwanted account creation | Pending users are denied API/WebSocket access until reviewed |
 | Lost device = lost keys | Can't read history | Acceptable with 10 h TTL; admin re-enrol |
 | Neon backups retain ciphertext > 10 h | Retention expectation | Shortest PITR, document |
 | Browser E2EE trust (JS delivered by server) | Malicious JS risk | CSP, SRI, signed releases; native client later |

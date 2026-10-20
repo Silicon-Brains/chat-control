@@ -14,12 +14,13 @@ Neon Postgres (pooled, TLS)   [ciphertext only]
 ```
 
 ## 2. Application Flow
-1. Admin bootstraps via CLI (creates admin + admin code + TOTP secret).
-2. Admin logs in → creates users → receives one-time hex codes.
-3. User logs in → browser generates ECDH keypair → public key registered.
-4. Conversation created → client generates AES-256 key → wraps for each member.
-5. Messages: encrypt (AES-GCM) → WS → store → fan-out → decrypt.
-6. Purge job deletes expired rows every 60 s.
+1. Admin identity is bootstrapped in Clerk and protected with MFA.
+2. User signs up directly with Clerk and verifies their email; the API provisions a pending account.
+3. Admin approves the registration; the API grants the Clerk user role and activates the local account.
+4. Approved user signs in → browser generates ECDH keypair → public key registered.
+5. Conversation created → client generates AES-256 key → wraps for each member.
+6. Messages: encrypt (AES-GCM) → WS → store → fan-out → decrypt.
+7. Purge job deletes expired rows every 60 s.
 
 ## 3. Frontend Architecture
 - Next.js 15 (App Router), TypeScript, Tailwind CSS.
@@ -51,11 +52,12 @@ REST `/api/v1/*` JSON; WebSocket `/ws?ticket=…`. Pydantic validation on every 
 
 ## 7. Authentication Flow
 ```
-User login:  POST /auth/login {username, code}
-   → rate-limit check → Argon2id verify → access JWT (10m) + refresh cookie (7d, rotating)
+User signup: Clerk → verified session → GET /users/me → local account pending
+   → 403 APPROVAL_PENDING until admin approval
+Admin approval: POST /admin/users/{id}/approve
+   → set Clerk public_metadata.role=user + local status=active + audit
 WS connect:  POST /auth/ws-ticket → one-time ticket (30s) → WS ?ticket=
-Refresh:     POST /auth/refresh (cookie) → rotate; reuse → revoke whole family
-Admin login: POST /admin/auth/login {username, admin_code, totp}
+Admin login: Clerk session JWT; server requires role=admin and configured MFA
 ```
 
 ## 8. Authorization / Roles
@@ -96,13 +98,10 @@ See PRD §9. Route groups: `(auth)`, `(app)` (user guard), `admin` (admin guard 
 ## 13. API Endpoint Structure
 | Method | Path | Role |
 |---|---|---|
-| POST | /auth/login | public |
-| POST | /auth/refresh · /auth/logout | user |
 | POST | /auth/ws-ticket | user |
-| POST | /admin/auth/login | public |
-| POST | /admin/users | admin |
 | GET | /admin/users | admin |
-| POST | /admin/users/{id}/reset-code | admin |
+| POST | /admin/users/{id}/approve | admin |
+| POST | /admin/users/{id}/reset-key | admin |
 | PATCH | /admin/users/{id} (disable/enable) | admin |
 | DELETE | /admin/users/{id} | admin |
 | GET | /admin/audit | admin |
@@ -120,6 +119,5 @@ See PRD §9. Route groups: `(auth)`, `(app)` (user guard), `admin` (admin guard 
 | Crypto | WebCrypto ECDH + AES-GCM | Native, fast, non-extractable keys |
 | One key per conversation | Wrapped per member | Same model for 1:1, group, broadcast |
 | Retention | `expires_at` column + purge job + read filter | Correct even if job lags |
-| Auth tokens | Short JWT in memory + refresh cookie | Mitigates XSS token theft |
-| Hex code storage | Argon2id hash | DB leak ≠ credential leak |
+| Authentication | Clerk-managed session JWT + API-side approval gate | Managed credentials and sessions; pending users have no application access |
 | WS auth | One-time ticket | Keeps JWT out of URLs/logs |

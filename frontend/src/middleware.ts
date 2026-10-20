@@ -1,40 +1,33 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse, type NextRequest } from 'next/server';
-import { SESSION_COOKIE } from '@/lib/constants';
 
 const isDev = process.env.NODE_ENV === 'development';
 const MOCK = process.env.NEXT_PUBLIC_MOCK === 'true';
 const USE_CLERK = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) && !MOCK;
 
-const PUBLIC_PATHS = new Set(['/login', '/admin/login', '/admin/signup']);
 const isAdminArea = createRouteMatcher(['/admin(.*)']);
 const isAdminAuthPage = createRouteMatcher(['/admin/login(.*)', '/admin/signup(.*)']);
+const isUserArea = createRouteMatcher([
+  '/dashboard(.*)',
+  '/chats(.*)',
+  '/groups(.*)',
+  '/broadcasts(.*)',
+  '/settings(.*)',
+]);
 
 const connectSrc = [process.env.NEXT_PUBLIC_API_URL, process.env.NEXT_PUBLIC_WS_URL].filter(
   (v): v is string => Boolean(v),
 );
 
-/** Optional cheap edge guard for the user area. Real authorisation is always enforced by the API. */
-function userGuard(req: NextRequest): NextResponse | null {
-  const { pathname } = req.nextUrl;
-  if (
-    process.env.SESSION_COOKIE_GUARD !== 'true' ||
-    pathname.startsWith('/admin') ||
-    PUBLIC_PATHS.has(pathname) ||
-    req.cookies.has(SESSION_COOKIE)
-  ) {
-    return null;
-  }
-  const url = req.nextUrl.clone();
-  url.pathname = '/login';
-  return NextResponse.redirect(url);
-}
-
 /** Clerk generates a nonce-based strict CSP (incl. Clerk's own hosts); ClerkProvider reads the nonce. */
 const withClerk = clerkMiddleware(
   async (auth, req) => {
-    if (isAdminArea(req) && !isAdminAuthPage(req)) await auth.protect();
-    return userGuard(req) ?? undefined;
+    if (isAdminArea(req) && !isAdminAuthPage(req)) {
+      await auth.protect({ unauthenticatedUrl: new URL('/admin/login', req.url).toString() });
+    }
+    if (isUserArea(req)) {
+      await auth.protect({ unauthenticatedUrl: new URL('/login', req.url).toString() });
+    }
   },
   {
     contentSecurityPolicy: {
@@ -52,11 +45,8 @@ const withClerk = clerkMiddleware(
   },
 );
 
-/** Used when Clerk isn't configured or mock mode is on (no admin Clerk session needed). */
+/** Used when Clerk isn't configured or mock mode is on. */
 function plain(req: NextRequest) {
-  const guard = userGuard(req);
-  if (guard) return guard;
-
   const nonce = btoa(crypto.randomUUID());
   const csp = [
     "default-src 'self'",

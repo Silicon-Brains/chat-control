@@ -65,14 +65,38 @@ class AdminService:
         )
         return rows[:limit], (str(rows[limit - 1].id) if len(rows) > limit else None)
 
+    async def approve_user(self, actor: User, user_id: uuid.UUID, *, ip: str) -> User:
+        user = await self._target(user_id)
+        if user.status != UserStatus.PENDING:
+            raise Conflict("Only pending users can be approved", code="USER_NOT_PENDING")
+        clerk_user = await self.c.clerk.get_user(user.clerk_user_id)
+        if clerk_user.role == UserRole.ADMIN.value:
+            raise Conflict("Admin accounts are managed separately", code="ADMIN_PROTECTED")
+        if clerk_user.banned or clerk_user.locked:
+            raise Conflict("This Clerk account is banned or locked", code="ACCOUNT_DISABLED")
+        if not clerk_user.email_verified:
+            raise Conflict("Verify the account email before approval", code="EMAIL_NOT_VERIFIED")
+        await self.c.clerk.set_user_role(user.clerk_user_id, UserRole.USER.value)
+        user.role = UserRole.USER
+        user.status = UserStatus.ACTIVE
+        user.synced_at = utcnow()
+        self.audit.add("user.approve", actor_id=actor.id, target_id=user.id, ip=ip)
+        await self.session.commit()
+        return user
+
     async def set_status(self, actor: User, user_id: uuid.UUID, *, status: str, ip: str) -> User:
         """Ban/unban in Clerk first (source of truth), then mirror locally and cut live connections."""
         user = await self._target(user_id)
+        if user.status == UserStatus.PENDING:
+            raise Conflict("Pending users must be approved or deleted", code="USER_NOT_PENDING")
         disable = UserStatus(status) == UserStatus.DISABLED
         if disable:
             await self.c.clerk.ban_user(user.clerk_user_id)
             await self.c.clerk.revoke_user_sessions(user.clerk_user_id)
         else:
+            clerk_user = await self.c.clerk.get_user(user.clerk_user_id)
+            if clerk_user.role != user.role.value:
+                raise Conflict("This account is not approved in Clerk", code="USER_NOT_APPROVED")
             await self.c.clerk.unban_user(user.clerk_user_id)
         user.status = UserStatus.DISABLED if disable else UserStatus.ACTIVE
         user.synced_at = utcnow()
@@ -144,6 +168,7 @@ class AdminService:
         state = self.c.purge_state
         return AdminStats(
             users_total=counts["total"],
+            users_pending=counts["pending"],
             users_active=counts["active"],
             users_disabled=counts["disabled"],
             live_messages=await self.msgs.count_live(),

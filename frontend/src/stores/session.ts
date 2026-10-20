@@ -19,6 +19,7 @@ interface SessionState {
   keyError: string | null;
   hydrate: () => Promise<void>;
   signIn: (res: LoginResponse) => Promise<void>;
+  acceptClerkUser: (user: User) => Promise<void>;
   signOut: () => Promise<void>;
   clearLocal: () => void;
 }
@@ -54,6 +55,11 @@ export const useSession = create<SessionState>((set, get) => {
       setAccessToken(res.accessToken);
       set({ user: res.user, status: 'authenticated' });
       await prepareKeys(res.user);
+    },
+
+    acceptClerkUser: async (user) => {
+      set({ user, status: 'authenticated' });
+      await prepareKeys(user);
     },
 
     signOut: async () => {

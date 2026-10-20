@@ -1,11 +1,4 @@
-"""Mirrors Clerk identities into the local ``users`` table (JIT provisioning, role + ban sync).
-
-Rules (invite-only):
-* A Clerk user may use the API only if ``public_metadata.role`` is ``user`` or ``admin`` - invitations created
-  by this API stamp ``role=user``, so sign-ups that bypass an invitation are refused with ``NOT_INVITED``
-  even if the Clerk dashboard is accidentally left open for public sign-up.
-* ``banned`` / ``locked`` Clerk users are mirrored as ``disabled``.
-"""
+"""Mirrors Clerk identities into the local ``users`` table (JIT provisioning, role + approval sync)."""
 
 from __future__ import annotations
 
@@ -52,23 +45,44 @@ class IdentityService:
 
     @staticmethod
     def _ensure_active(user: User) -> User:
+        if user.status == UserStatus.PENDING:
+            raise Forbidden("Your account is awaiting admin approval", code="APPROVAL_PENDING")
         if not user.is_active:
             raise Forbidden("This account is disabled", code="ACCOUNT_DISABLED")
         return user
 
     async def apply(self, cu: ClerkUser, user: User | None) -> User:
-        """Create/update the local mirror from Clerk state. Raises ``NOT_INVITED`` for un-invited accounts."""
+        """Create/update the local mirror; unapproved self-signups remain pending."""
         now = utcnow()
-        if cu.role is None:
-            if user is not None:  # role removed in Clerk => cut access
-                user.status = UserStatus.DISABLED
-                user.synced_at = now
-                await self.session.commit()
-            raise Forbidden("Your account has not been invited", code="NOT_INVITED")
-        status = UserStatus.DISABLED if (cu.banned or cu.locked) else UserStatus.ACTIVE
-        role = UserRole(cu.role)
         if user is None:
+            role = UserRole(cu.role) if cu.role else UserRole.USER
+            status = (
+                UserStatus.DISABLED
+                if cu.banned or cu.locked
+                else UserStatus.PENDING
+                if cu.role is None or (role == UserRole.USER and not cu.email_verified)
+                else UserStatus.ACTIVE
+            )
             return await self._create(cu, role, status)
+
+        if cu.role is None:
+            # Removing metadata from an active account revokes its access. A pending
+            # account stays pending until an administrator explicitly approves it.
+            role = UserRole.USER
+            status = (
+                UserStatus.DISABLED
+                if cu.banned or cu.locked or user.status == UserStatus.ACTIVE
+                else user.status
+            )
+        else:
+            role = UserRole(cu.role)
+            status = (
+                UserStatus.DISABLED
+                if cu.banned or cu.locked
+                else UserStatus.PENDING
+                if role == UserRole.USER and not cu.email_verified
+                else UserStatus.ACTIVE
+            )
         user.role, user.status = role, status
         user.display_name, user.email = cu.display_name, cu.email
         user.synced_at = user.last_login_at = now
@@ -91,7 +105,9 @@ class IdentityService:
                 last_login_at=now,
             )
             self.users.add(user)
-            AuditRepository(self.session).add("user.provision", actor_id=None, meta={"role": role.value})
+            AuditRepository(self.session).add(
+                "user.provision", actor_id=None, meta={"role": role.value, "status": status.value}
+            )
             try:
                 await self.session.commit()
                 return user

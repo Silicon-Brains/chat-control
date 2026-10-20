@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import text
 
 from tests.fakes import OTHER_KEY, mint
-from tests.integration.conftest import API, World, b64, grant, make_spki, recv_until, send_event
+from tests.integration.conftest import API, Account, World, b64, grant, make_spki, recv_until, send_event
 
 pytestmark = pytest.mark.integration
 
@@ -473,7 +473,7 @@ def test_disable_enable_reset_key_and_delete(world: World) -> None:
     stats = c.get(f"{API}/admin/stats", headers=admin.auth).json()
     assert stats["usersTotal"] >= 4 and "failedLogins24h" not in stats
     actions = {a["action"] for a in c.get(f"{API}/admin/audit?limit=100", headers=admin.auth).json()["items"]}
-    assert {"user.provision", "user.invite", "user.disable", "user.enable", "user.reset_key", "user.delete"} <= actions
+    assert {"user.provision", "user.invite", "user.approve", "user.disable", "user.enable", "user.reset_key", "user.delete"} <= actions
 
 
 # --------------------------------------------------------------------------------- webhooks
@@ -527,12 +527,50 @@ def test_webhooks_sync_ban_role_and_deletion(world: World) -> None:
     )
     assert c.get(f"{API}/users/me", headers=erin.auth).status_code == 200
 
-    stranger = world.clerk.add_user("hook-stranger@corp.test", role=None)  # un-invited sign-up => ignored
+    direct_signup = world.clerk.add_user("direct-signup@corp.test", role=None)
+    direct_account = Account("direct-signup", direct_signup)
+    pending_response = c.get(f"{API}/users/me", headers=direct_account.auth)
+    assert pending_response.status_code == 403
+    assert pending_response.json()["error"]["code"] == "APPROVAL_PENDING"
+    assert c.post(f"{API}/auth/ws-ticket", headers=direct_account.auth).status_code == 403
+    direct_row = c.get(f"{API}/admin/users?q=direct-signup", headers=world.admin.auth).json()["items"][0]
+    approved_direct = c.post(f"{API}/admin/users/{direct_row['id']}/approve", headers=world.admin.auth)
+    assert approved_direct.status_code == 200
+    assert c.get(f"{API}/users/me", headers=direct_account.auth).status_code == 200
+
+    stranger = world.clerk.add_user("hook-stranger@corp.test", role=None)
     assert (
         c.post(hook, **_signed(world, {"type": "user.created", "data": world.clerk.api_json(stranger)})).status_code
         == 204
     )
-    assert c.get(f"{API}/admin/users?q=hook", headers=world.admin.auth).json()["items"] == []
+    pending = c.get(f"{API}/admin/users?q=hook", headers=world.admin.auth).json()["items"]
+    assert len(pending) == 1 and pending[0]["status"] == "pending"
+    assert (
+        c.patch(f"{API}/admin/users/{pending[0]['id']}", headers=world.admin.auth, json={"status": "active"})
+        .json()["error"]["code"]
+        == "USER_NOT_PENDING"
+    )
+    stranger_account = Account("stranger", stranger)
+    waiting = c.get(f"{API}/users/me", headers=stranger_account.auth)
+    assert waiting.status_code == 403 and waiting.json()["error"]["code"] == "APPROVAL_PENDING"
+    assert c.get(f"{API}/users", headers=stranger_account.auth).status_code == 403
+    approved = c.post(f"{API}/admin/users/{pending[0]['id']}/approve", headers=world.admin.auth)
+    assert approved.status_code == 200 and approved.json()["status"] == "active"
+    assert world.clerk.users[stranger]["role"] == "user"
+    assert c.get(f"{API}/users/me", headers=stranger_account.auth).status_code == 200
+    assert (
+        c.post(f"{API}/admin/users/{pending[0]['id']}/approve", headers=world.admin.auth).json()["error"]["code"]
+        == "USER_NOT_PENDING"
+    )
+
+    unverified = world.clerk.add_user("unverified@corp.test", role=None, email_verified=False)
+    assert (
+        c.post(hook, **_signed(world, {"type": "user.created", "data": world.clerk.api_json(unverified)})).status_code
+        == 204
+    )
+    unverified_row = c.get(f"{API}/admin/users?q=unverified", headers=world.admin.auth).json()["items"][0]
+    approval = c.post(f"{API}/admin/users/{unverified_row['id']}/approve", headers=world.admin.auth)
+    assert approval.status_code == 409 and approval.json()["error"]["code"] == "EMAIL_NOT_VERIFIED"
 
     assert (
         c.post(

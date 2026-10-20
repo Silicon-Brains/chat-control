@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import { Providers } from './providers';
+import { ClerkShell } from '@/components/auth/clerk-shell';
 import { Toaster } from '@/components/ui/toaster';
 import './globals.css';
 
@@ -8,7 +9,7 @@ const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-jakart
 
 export const metadata: Metadata = {
   title: { default: 'VaultChat', template: '%s · VaultChat' },
-  description: 'Invite-only, end-to-end encrypted chat. Messages disappear after 10 hours.',
+  description: 'End-to-end encrypted chat with admin-approved access. Messages disappear after 10 hours.',
   robots: { index: false, follow: false },
   referrer: 'no-referrer',
 };
@@ -25,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           Skip to content
         </a>
-        <Providers>{children}</Providers>
+        <ClerkShell><Providers>{children}</Providers></ClerkShell>
         <Toaster />
       </body>
     </html>

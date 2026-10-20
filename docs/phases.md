@@ -38,27 +38,27 @@ Legend: `- [ ]` todo · `- [x]` done. Each phase ends with something runnable.
 **Expected result:** migrated schema.
 **Done when:** `alembic upgrade head` clean on fresh DB; constraint tests pass.
 
-## Phase 4 — Authentication & Admin Bootstrap
-**Objective:** Secure login for admin and users.
+## Phase 4 — Clerk Authentication & Admin Bootstrap
+**Objective:** Clerk sign-in for admins and users, with server-enforced user approval.
 **Tasks**
-- [ ] `bootstrap_admin` CLI (admin code + TOTP QR)
-- [ ] Admin login (code + TOTP), user login (username + hex code)
-- [ ] Argon2id, rate limit, lockout, audit logging
-- [ ] JWT access + rotating refresh cookie; logout; reuse detection
-- [ ] Login pages (user/admin) + route guards
+- [x] Clerk session JWT verification, identity mirroring and Clerk admin bootstrap
+- [ ] Public Clerk sign-up, email verification and user/admin sign-in pages
+- [ ] Provision self-signups as pending; deny pending users on REST and WebSocket paths
+- [ ] Admin approval promotes a pending Clerk account; audit approval and rejection
+- [ ] Clerk-based route guards and MFA for admins
 **Dependencies:** Phases 2, 3
-**Expected result:** both roles can log in/out securely.
-**Done when:** brute-force & token-reuse tests pass.
+**Expected result:** users can sign up and sign in, but cannot use the application before admin approval.
+**Done when:** pending access is denied across REST and WebSockets, approval activates access, and admin authorization tests pass.
 
 ## Phase 5 — Admin User Management
-**Objective:** Admin-only account creation.
+**Objective:** Admin review and approval of self-registered accounts.
 **Tasks**
-- [ ] Create user → generate 10-hex code → show once (copy button, auto-hide)
-- [ ] Disable/enable/delete, reset code (revokes sessions + key)
-- [ ] Users table, audit log page
+- [x] Users table, disable/enable/delete, reset device key
+- [ ] Pending-user queue with approve/reject actions
+- [ ] Keep invitation flow as an optional alternative onboarding path
 **Dependencies:** Phase 4
-**Expected result:** admin can onboard users; non-admin gets 403.
-**Done when:** authz tests pass; code never retrievable after creation.
+**Expected result:** admin can approve signups; pending users remain blocked; non-admin gets 403.
+**Done when:** approval and denial are audited and authorization tests pass.
 
 ## Phase 6 — Crypto & Key Management (frontend)
 **Objective:** E2EE primitives.
