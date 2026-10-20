@@ -1,0 +1,136 @@
+# database.md — Database Design
+
+## 1. Technology
+- **Neon Postgres 16+**, database `vaultchat`.
+- App connects via **pooled** endpoint (`-pooler`, asyncpg, `statement_cache_size=0` because of PgBouncer transaction mode). Alembic uses the **direct** endpoint.
+- TLS required (`sslmode=require`).
+- IDs: UUID (v7 preferred for time-ordered inserts).
+
+## 2. ER Overview
+```
+users ─┬─< refresh_tokens
+       ├─< conversation_members >─ conversations ─< messages
+       ├─< conversation_keys (per member, per version)
+       └─< audit_logs (actor)
+```
+
+## 3. Tables
+
+```
+users
+ ├── id               uuid PK
+ ├── username         citext UNIQUE NOT NULL
+ ├── display_name     text NOT NULL
+ ├── role             enum('admin','user') NOT NULL DEFAULT 'user'
+ ├── code_hash        text NOT NULL            -- Argon2id (user hex code / admin code)
+ ├── totp_secret_enc  bytea NULL               -- admin only, AES-GCM encrypted with server key
+ ├── public_key       bytea NULL               -- ECDH P-256 (SPKI), set on first login
+ ├── key_fingerprint  text NULL
+ ├── status           enum('active','disabled') NOT NULL DEFAULT 'active'
+ ├── failed_attempts  int NOT NULL DEFAULT 0
+ ├── locked_until     timestamptz NULL
+ ├── created_by       uuid → users.id NULL
+ ├── created_at       timestamptz NOT NULL DEFAULT now()
+ └── last_login_at    timestamptz NULL
+
+refresh_tokens
+ ├── id           uuid PK
+ ├── user_id      uuid → users.id ON DELETE CASCADE
+ ├── family_id    uuid NOT NULL                -- reuse detection
+ ├── token_hash   bytea UNIQUE NOT NULL        -- SHA-256
+ ├── user_agent   text, ip inet
+ ├── expires_at   timestamptz NOT NULL
+ ├── revoked_at   timestamptz NULL
+ └── created_at   timestamptz DEFAULT now()
+
+conversations
+ ├── id              uuid PK
+ ├── type            enum('direct','group','broadcast') NOT NULL
+ ├── name            text NULL                 -- group/broadcast only
+ ├── direct_pair_key text UNIQUE NULL          -- "minUUID:maxUUID" for direct; prevents duplicates
+ ├── current_key_version int NOT NULL DEFAULT 1
+ ├── created_by      uuid → users.id
+ └── created_at      timestamptz DEFAULT now()
+
+conversation_members
+ ├── conversation_id uuid → conversations.id ON DELETE CASCADE
+ ├── user_id         uuid → users.id ON DELETE CASCADE
+ ├── role            enum('owner','member','sender') NOT NULL DEFAULT 'member'
+ ├── last_read_at    timestamptz NULL
+ ├── joined_at       timestamptz DEFAULT now()
+ └── PK (conversation_id, user_id)
+
+conversation_keys
+ ├── conversation_id uuid
+ ├── user_id         uuid
+ ├── key_version     int
+ ├── wrapped_key     bytea NOT NULL            -- AES key wrapped via ECDH+HKDF
+ ├── wrapper_pub     bytea NOT NULL            -- ephemeral/creator public key used to wrap
+ ├── created_at      timestamptz DEFAULT now()
+ └── PK (conversation_id, user_id, key_version)
+
+messages
+ ├── id              uuid PK (v7)
+ ├── conversation_id uuid → conversations.id ON DELETE CASCADE
+ ├── sender_id       uuid → users.id
+ ├── ciphertext      bytea NOT NULL (CHECK octet_length ≤ 8192)
+ ├── nonce           bytea NOT NULL (12 bytes)
+ ├── key_version     int NOT NULL
+ ├── created_at      timestamptz NOT NULL DEFAULT now()
+ └── expires_at      timestamptz NOT NULL DEFAULT now() + interval '10 hours'
+
+audit_logs
+ ├── id          bigserial PK
+ ├── actor_id    uuid → users.id NULL
+ ├── action      text NOT NULL        -- user.create, user.reset_code, login.fail …
+ ├── target_id   uuid NULL
+ ├── ip          inet, meta jsonb
+ └── created_at  timestamptz DEFAULT now()    -- audit logs hold no message content
+```
+
+## 4. Constraints & Rules
+- `messages.expires_at` is set by **DB default**, never by the client.
+- Direct conversations: exactly 2 members (enforced in service + `direct_pair_key` unique).
+- Broadcast: only members with role `sender`/`owner` may insert (service-level check).
+- `ON DELETE CASCADE` keeps orphaned data out.
+
+## 5. Indexes
+| Index | Purpose |
+|---|---|
+| `messages (conversation_id, created_at DESC, id)` | history pagination |
+| `messages (expires_at)` | purge job |
+| `conversation_members (user_id)` | list my chats |
+| `refresh_tokens (user_id)`, `(token_hash)` unique | session ops |
+| `audit_logs (created_at DESC)` | admin view |
+| `users (username)` unique | login |
+
+## 6. Important Queries
+```sql
+-- History (never returns expired)
+SELECT id, sender_id, ciphertext, nonce, key_version, created_at, expires_at
+FROM messages
+WHERE conversation_id = $1 AND expires_at > now() AND (created_at, id) < ($2, $3)
+ORDER BY created_at DESC, id DESC LIMIT 50;
+
+-- Purge (batched, safe under concurrency)
+DELETE FROM messages WHERE id IN (
+  SELECT id FROM messages WHERE expires_at <= now() LIMIT 5000 FOR UPDATE SKIP LOCKED);
+
+-- Unread counts
+SELECT m.conversation_id, count(*) FROM messages m
+JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = $1
+WHERE m.expires_at > now() AND m.created_at > coalesce(cm.last_read_at,'-infinity')
+  AND m.sender_id <> $1 GROUP BY 1;
+```
+Also purge: expired `refresh_tokens`, superseded `conversation_keys` older than 10 h.
+
+## 7. Seed Data
+- 1 admin (via CLI only, never SQL seed in prod).
+- Dev only: 5 demo users, 1 group, 1 broadcast, 20 sample ciphertext messages (generated by a dev script using real crypto).
+
+## 8. Database Security
+- Least-privilege DB role for app (no DDL); separate migration role.
+- Only ciphertext + metadata stored; no plaintext, no private keys, no raw codes/tokens.
+- Secrets (DB URL, TOTP encryption key, JWT keys) from env/secret manager.
+- Enable Neon IP allow-list if hosting is static; backups follow the same 10 h rule for message content (short PITR window — see System_Design §10).
+- Row access always through service layer with membership checks.

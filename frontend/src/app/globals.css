@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { height: 100%; }
+  body {
+    @apply min-h-dvh font-sans text-ink-600 antialiased;
+    background:
+      radial-gradient(60% 50% at 10% 0%, #E7EBC9 0%, transparent 60%),
+      radial-gradient(50% 60% at 100% 40%, #C7C2EA 0%, transparent 60%),
+      linear-gradient(135deg, #CFE3E1 0%, #BED3DB 100%);
+    background-attachment: fixed;
+  }
+  h1, h2, h3 { @apply text-ink-900; }
+  :focus-visible { @apply outline-none ring-2 ring-primary-500 ring-offset-2 ring-offset-transparent; }
+}
+
+@layer components {
+  .glass {
+    @apply rounded-card border border-white/70 bg-white/[0.45] shadow-glass;
+    backdrop-filter: blur(20px) saturate(140%);
+  }
+  .skeleton { @apply relative overflow-hidden rounded-icon bg-white/50; }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/60 to-transparent;
+  }
+}
+
+@media (max-width: 639px) {
+  .glass { backdrop-filter: blur(12px) saturate(140%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

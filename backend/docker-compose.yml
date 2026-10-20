@@ -1,0 +1,28 @@
+# Local development stack:  docker compose up --build
+# (production uses Neon; this Postgres is for laptops and CI only)
+services:
+  db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: vc, POSTGRES_PASSWORD: vc, POSTGRES_DB: vaultchat }
+    ports: ["5432:5432"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U vc -d vaultchat"], interval: 5s, retries: 10 }
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  migrate:
+    build: .
+    command: alembic upgrade head
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://vc:vc@db/vaultchat?sslmode=disable
+      DATABASE_URL_DIRECT: postgresql://vc:vc@db/vaultchat?sslmode=disable
+    depends_on: { db: { condition: service_healthy } }
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://vc:vc@db/vaultchat?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      ENV: development
+    ports: ["8000:8000"]
+    depends_on: { migrate: { condition: service_completed_successfully }, redis: { condition: service_started } }
