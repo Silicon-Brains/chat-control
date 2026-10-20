@@ -120,12 +120,10 @@ def create_app(
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.origins,
-        allow_credentials=False,  # Bearer tokens only; no cookies are used
+        allow_origins=settings.allowed_origins,   # list of origins, never "*"
+        allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
-        expose_headers=["X-Request-ID", "Retry-After"],
-        max_age=600,
+        allow_headers=["Authorization", "Content-Type"],
     )
     app.add_middleware(RequestContextMiddleware)
 

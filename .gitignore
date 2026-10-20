@@ -8,3 +8,4 @@ frontend/.env.local
 frontend/next-env.d.ts
 frontend/.next
 frontend/node-modules
+
