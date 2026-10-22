@@ -37,6 +37,21 @@ def test_key_registration_and_directory(world: World) -> None:
     other = c.put(f"{API}/users/me/key", headers=grace.auth, json={"publicKey": make_spki()})
     assert other.status_code == 409 and other.json()["error"]["code"] == "KEY_ALREADY_REGISTERED"
     assert c.put(f"{API}/users/me/key", headers=grace.auth, json={"publicKey": b64(b"\x01" * 91)}).status_code == 422
+    cid = c.post(
+        f"{API}/conversations",
+        headers=grace.auth,
+        json={"type": "direct", "members": [grant(grace.user_id), grant(world.users["bob"].user_id)]},
+    ).json()["id"]
+    replacement_key = make_spki()
+    assert c.post(
+        f"{API}/users/me/key/reset", headers=grace.auth, json={"publicKey": replacement_key}
+    ).status_code == 204
+    assert c.get(f"{API}/users/me", headers=grace.auth).json()["hasPublicKey"] is True
+    assert c.get(f"{API}/conversations/{cid}", headers=grace.auth).status_code == 404
+    assert c.put(f"{API}/users/me/key", headers=grace.auth, json={"publicKey": grace.pub}).status_code == 409
+    assert c.post(
+        f"{API}/users/me/key/reset", headers=world.admin.auth, json={"publicKey": make_spki()}
+    ).status_code == 403
     listing = c.get(f"{API}/users", headers=grace.auth).json()["items"]
     names = {u["username"] for u in listing}
     assert {"alice", "bob", "carol", "grace"} <= names and "root" not in names

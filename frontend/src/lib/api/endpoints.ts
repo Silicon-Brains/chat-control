@@ -33,6 +33,7 @@ export const usersApi = {
     return Array.isArray(result) ? result : result.items ?? [];
   },
   registerKey: (publicKey: string) => api('/users/me/key', { method: 'PUT', body: { publicKey } }),
+  resetKey: (publicKey: string) => api('/users/me/key/reset', { method: 'POST', body: { publicKey } }),
 };
 
 export interface CreateConversationBody {

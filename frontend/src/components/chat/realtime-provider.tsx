@@ -29,15 +29,30 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     const offStatus = realtime.onStatus(setConnection);
     const offEvents = realtime.onEvent(async (event) => {
       switch (event.t) {
+        case 'message.ack':
+          useChatStore.getState().markSent(event.conversationId, event.id, event.createdAt, event.expiresAt);
+          break;
         case 'message.new': {
           let conv = qc.getQueryData<Conversation[]>(CONVERSATIONS_KEY)?.find((c) => c.id === event.conversationId);
           if (!conv) {
-            const fresh = await qc.fetchQuery({ queryKey: CONVERSATIONS_KEY, queryFn: conversationsApi.list, staleTime: 0 });
+            const fresh = await qc.fetchQuery({
+              queryKey: CONVERSATIONS_KEY,
+              queryFn: conversationsApi.list,
+              staleTime: 5_000,
+            });
             conv = fresh.find((c) => c.id === event.conversationId);
           }
           if (conv) await ensureKeys(userId, conv);
           upsert(event.conversationId, [await toChatMessage(event)]);
-          void qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
+          qc.setQueryData<Conversation[]>(CONVERSATIONS_KEY, (current) =>
+            current
+              ?.map((conversation) =>
+                conversation.id === event.conversationId
+                  ? { ...conversation, lastMessageAt: event.createdAt }
+                  : conversation,
+              )
+              .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')),
+          );
           break;
         }
         case 'message.expired':
@@ -47,10 +62,18 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         case 'key.rotated':
           void qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
           break;
+        case 'key.granted':
+          void qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
+          void qc.invalidateQueries({ queryKey: ['conversation', event.conversationId] });
+          break;
+        case 'conversation.created':
+          void qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
+          break;
         case 'conversation.updated':
           void qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
           void qc.invalidateQueries({ queryKey: ['conversation', event.conversationId] });
           break;
+        case 'conversation.removed':
         case 'conversation.deleted':
           qc.setQueryData<Conversation[]>(CONVERSATIONS_KEY, (current) =>
             current?.filter((conversation) => conversation.id !== event.conversationId),
@@ -60,6 +83,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           if (pathnameRef.current === `/chats/${event.conversationId}`) router.replace('/chats');
           break;
         case 'error':
+          if (event.ref) useChatStore.getState().markFailedById(event.ref);
           toast.error(event.error.message);
           break;
       }

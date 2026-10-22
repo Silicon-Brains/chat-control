@@ -30,7 +30,7 @@
 - Users have modern browsers with WebCrypto + IndexedDB.
 - Users can create Clerk accounts directly; new accounts remain pending until an admin approves them.
 - Clerk handles credentials, email verification, MFA and sessions. The backend alone can set approval roles.
-- One active device key per user (new login on new device rotates key).
+- One active device key per user; replacing a lost local key requires explicit reset and invalidates the user's existing wrapped conversation keys.
 - Admin is trusted to distribute codes but **cannot read messages**.
 
 ## 4. High-Level Architecture

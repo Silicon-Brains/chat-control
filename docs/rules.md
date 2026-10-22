@@ -37,6 +37,7 @@
 - Require verified email for users and MFA for admins.
 - Audit registration, approval, rejection, disable/enable and delete actions.
 - Encrypt in browser; private key `extractable: false`; store only in IndexedDB.
+- When local key storage is lost, require explicit confirmation before self-service key reset; reset removes the user's wrapped conversation keys and requires group-key rotation.
 - Validate membership on every REST call **and** every WS event.
 - Set headers: strict CSP (no inline scripts, nonces), HSTS, `X-Content-Type-Options`, `Referrer-Policy: no-referrer`, `frame-ancestors 'none'`.
 - Strict CORS allow-list; cookies `HttpOnly; Secure; SameSite=Strict`.

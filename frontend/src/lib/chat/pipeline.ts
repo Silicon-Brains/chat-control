@@ -20,10 +20,10 @@ export async function toChatMessage(m: EncryptedMessage): Promise<ChatMessage> {
   }
 }
 
-export async function prepareOutgoing(conversation: Conversation, senderId: string, text: string) {
+export async function prepareOutgoing(conversation: Conversation, senderId: string, text: string, id: string) {
   const key = getConversationKey(conversation.id, conversation.currentKeyVersion);
   if (!key) throw new Error('Encryption key unavailable on this device');
   const keyVersion = conversation.currentKeyVersion;
   const sealed = await encryptMessage(key, text, buildAad(conversation.id, senderId, keyVersion));
-  return { id: crypto.randomUUID(), keyVersion, ...sealed };
+  return { id, keyVersion, ...sealed };
 }

@@ -5,6 +5,8 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Response, status
 
 from app.api.deps import ClientIp, ContainerDep, CurrentUser, SessionDep
+from app.core.errors import Forbidden
+from app.models import UserRole
 from app.schemas.user import DirectoryPage, DirectoryUser, MeResponse, RegisterKeyRequest
 from app.services.user_service import UserService
 
@@ -31,6 +33,16 @@ async def register_key(
     body: RegisterKeyRequest, user: CurrentUser, session: SessionDep, container: ContainerDep, ip: ClientIp
 ) -> Response:
     await UserService(session, container).register_public_key(user, body.public_key, ip=ip)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/me/key/reset", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_key(
+    body: RegisterKeyRequest, user: CurrentUser, session: SessionDep, container: ContainerDep, ip: ClientIp
+) -> Response:
+    if user.role != UserRole.USER:
+        raise Forbidden("Only user accounts can reset device keys")
+    await UserService(session, container).reset_key(user, user.id, ip=ip, raw_public_key=body.public_key)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

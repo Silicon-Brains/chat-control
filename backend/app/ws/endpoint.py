@@ -14,7 +14,6 @@ from app.core.errors import AppError, RateLimited
 from app.core.rate_limit import enforce
 from app.core.security import hash_token
 from app.repositories.tokens import TokenRepository
-from app.repositories.users import UserRepository
 from app.schemas.message import (
     WsConversationRead,
     WsMessageSend,
@@ -38,26 +37,25 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         await ws.close(code=1008)  # CSWSH defence: handshake refused (HTTP 403)
         return
 
-    user = None
+    user_id = None
     ticket = ws.query_params.get("ticket")
     if ticket and len(ticket) < 128:
         async with container.session_factory() as session:
-            uid = await TokenRepository(session).consume_ticket(hash_token(ticket))  # single use
+            user_id = await TokenRepository(session).consume_ticket(hash_token(ticket))
             await session.commit()
-            user = await UserRepository(session).get(uid) if uid else None
-    if user is None or not user.is_active:
+    if user_id is None:
         await ws.accept()
         await ws.close(code=CLOSE_UNAUTHORIZED)
         return
 
     try:
-        conn = await container.hub.register(user.id, ws)
+        conn = await container.hub.register(user_id, ws)
     except TooManyConnections:
         await ws.accept()
         await ws.close(code=CLOSE_TOO_MANY)
         return
 
-    container.hub.send(conn, {"t": "ready", "userId": str(user.id)})
+    container.hub.send(conn, {"t": "ready", "userId": str(user_id)})
     try:
         await _serve(container, conn)
     finally:
@@ -103,11 +101,7 @@ async def _serve(container: Container, conn: Connection) -> None:
                 hub.send(conn, {"t": "pong"})
             elif isinstance(event, WsConversationRead):
                 async with container.session_factory() as session:
-                    user = await UserRepository(session).get(conn.user_id)
-                    if user is None or not user.is_active:
-                        await ws.close(code=4403)
-                        return
-                    await ChatService(session, container).mark_read(user, event.conversation_id)
+                    await ChatService(session, container).mark_read_for_user(conn.user_id, event.conversation_id)
             elif isinstance(event, WsMessageSend):
                 await _handle_send(container, conn, event)
         except RateLimited as exc:
@@ -132,7 +126,6 @@ async def _handle_send(container: Container, conn: Connection, event: WsMessageS
             key_version=event.key_version,
             client_id=event.id,
         )
-        members = [] if result.duplicate else await chat.member_ids(event.conversation_id)
     msg = result.message
     container.hub.send(
         conn,
@@ -145,5 +138,5 @@ async def _handle_send(container: Container, conn: Connection, event: WsMessageS
             "duplicate": result.duplicate,
         },
     )
-    if members:
-        await container.hub.publish(members, message_new_event(msg))
+    if result.member_ids:
+        await container.hub.publish(result.member_ids, message_new_event(msg))

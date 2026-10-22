@@ -72,6 +72,7 @@ def view_to_out(view: ConversationView) -> ConversationOut:
 class SendResult:
     message: StoredMessage
     duplicate: bool
+    member_ids: list[uuid.UUID]
 
 
 class ChatService:
@@ -200,7 +201,8 @@ class ChatService:
         return [view_to_out(v) for v in await self.convs.list_for_user(user.id)]
 
     async def get_for_user(self, user: User, cid: uuid.UUID) -> ConversationOut:
-        await self._require_member(cid, user)
+        # list_for_user applies the membership predicate itself, so this single query
+        # both authorizes the read and returns the conversation view.
         views = await self.convs.list_for_user(user.id, conversation_ids=[cid])
         if not views:
             raise NotFound("Conversation not found", code="CONVERSATION_NOT_FOUND")
@@ -252,8 +254,11 @@ class ChatService:
         return page, next_cursor
 
     async def mark_read(self, user: User, cid: uuid.UUID) -> None:
-        await self._require_member(cid, user)
-        await self.convs.mark_read(cid, user.id)
+        await self.mark_read_for_user(user.id, cid)
+
+    async def mark_read_for_user(self, user_id: uuid.UUID, cid: uuid.UUID) -> None:
+        if not await self.convs.mark_read(cid, user_id):
+            raise NotFound("Conversation not found", code="CONVERSATION_NOT_FOUND")
         await self.session.commit()
 
     async def member_ids(self, cid: uuid.UUID) -> list[uuid.UUID]:
@@ -406,12 +411,11 @@ class ChatService:
         key_version: int,
         client_id: uuid.UUID | None,
     ) -> SendResult:
-        # FOR SHARE serialises against member removal / key rotation (they take FOR UPDATE).
-        conv = await self.convs.get(conversation_id, for_share=True)
-        member = await self.convs.get_member(conversation_id, user_id) if conv else None
-        if conv is None or member is None:
+        # Lock and fetch membership + fan-out targets in one query.
+        conv, member_role, member_ids = await self.convs.get_for_send(conversation_id, user_id)
+        if conv is None or member_role is None:
             raise Forbidden("You are not a member of this conversation", code="NOT_A_MEMBER")
-        if conv.type == ConversationType.BROADCAST and member.role not in (MemberRole.OWNER, MemberRole.SENDER):
+        if conv.type == ConversationType.BROADCAST and member_role not in (MemberRole.OWNER, MemberRole.SENDER):
             raise Forbidden("Only senders can post in this channel", code="NOT_A_SENDER")
         if conv.current_key_version != key_version:
             raise Conflict(
@@ -432,11 +436,11 @@ class ChatService:
             existing = await self.msgs.get(message_id)
             if existing and existing.sender_id == user_id and existing.conversation_id == conversation_id:
                 await self.session.commit()  # releases the share lock
-                return SendResult(existing, True)
+                return SendResult(existing, True, [])
             await self.session.commit()
             raise Conflict("Message id already in use", code="MESSAGE_ID_CONFLICT")
         await self.session.commit()
-        return SendResult(row, False)
+        return SendResult(row, False, member_ids)
 
     async def count_conversations(self) -> int:
         return int((await self.session.execute(select(func.count()).select_from(Conversation))).scalar_one())

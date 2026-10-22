@@ -18,6 +18,7 @@ def create_engine(settings: Settings) -> AsyncEngine:
         pool_timeout=settings.db_pool_timeout,
         pool_recycle=settings.db_pool_recycle,
         pool_pre_ping=True,  # survives Neon scale-to-zero / idle disconnects
+        pool_use_lifo=True,  # preferentially reuse the warmest connection under light load
         connect_args=connect_args,
     )
 

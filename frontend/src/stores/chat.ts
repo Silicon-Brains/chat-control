@@ -7,6 +7,8 @@ interface ChatState {
   setConnection: (s: ConnectionStatus) => void;
   upsert: (conversationId: string, incoming: ChatMessage[]) => void;
   markFailed: (conversationId: string, id: string) => void;
+  markSent: (conversationId: string, id: string, createdAt: string, expiresAt: string) => void;
+  markFailedById: (id: string) => void;
   remove: (ids: string[]) => void;
   clearConversation: (conversationId: string) => void;
   prune: (now: number) => void;
@@ -35,6 +37,34 @@ export const useChatStore = create<ChatState>((set) => ({
         ),
       },
     })),
+  markSent: (conversationId, id, createdAt, expiresAt) =>
+    set((s) => {
+      const messages = s.messages[conversationId];
+      if (!messages) return s;
+      return {
+        messages: {
+          ...s.messages,
+          [conversationId]: messages.map((message) =>
+            message.id === id ? { ...message, createdAt, expiresAt, status: 'ok' } : message,
+          ),
+        },
+      };
+    }),
+  markFailedById: (id) =>
+    set((s) => {
+      let changed = false;
+      const messages = Object.fromEntries(
+        Object.entries(s.messages).map(([conversationId, list]) => {
+          const next = list.map((message) => {
+            if (message.id !== id || message.status !== 'pending') return message;
+            changed = true;
+            return { ...message, status: 'failed' as const };
+          });
+          return [conversationId, next];
+        }),
+      );
+      return changed ? { messages } : s;
+    }),
   remove: (ids) =>
     set((s) => {
       const drop = new Set(ids);

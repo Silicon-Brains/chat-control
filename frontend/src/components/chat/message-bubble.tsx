@@ -1,5 +1,5 @@
 import { AlertCircle, Clock, LockKeyhole } from 'lucide-react';
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { cn, formatTime } from '@/lib/utils';
 import { VerifiedMark } from '@/components/ui/verified-mark';
 import { isVoiceMessage, parseVoiceMessage, voicePayloadToBlob } from '@/lib/chat/voice';
@@ -7,7 +7,7 @@ import type { ChatMessage } from '@/types';
 import { ExpiryChip } from './expiry-chip';
 import { VoiceMessagePlayer } from './voice-message-player';
 
-export function MessageBubble({
+export const MessageBubble = memo(function MessageBubble({
   message,
   mine,
   senderName,
@@ -67,4 +67,4 @@ export function MessageBubble({
       </div>
     </li>
   );
-}
+});

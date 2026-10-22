@@ -138,6 +138,20 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
     me.publicKey = body.publicKey; me.keyFingerprint = await fingerprintOf(spki);
     return out();
   }
+  if (path === '/users/me/key/reset' && method === 'POST') {
+    const me = requireUser();
+    if (me.role !== 'user') fail(403, 'FORBIDDEN', 'Only user accounts can reset device keys');
+    const spki = Uint8Array.from(atob(body.publicKey), (c) => c.charCodeAt(0));
+    me.publicKey = body.publicKey; me.keyFingerprint = await fingerprintOf(spki);
+    for (let i = convs.length - 1; i >= 0; i--) {
+      const conv = convs[i]!;
+      if (!conv.members.some((member) => member.userId === me.id)) continue;
+      if (conv.type === 'direct') convs.splice(i, 1);
+      else delete conv.keys[me.id];
+    }
+    log(me, 'user.reset_key', me.id);
+    return out();
+  }
 
   if (path === '/conversations' && method === 'GET') {
     const me = requireUser();
@@ -284,7 +298,7 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
 }
 
 /** Loopback for WebSocket sends: stores the ciphertext and returns the broadcast event. */
-export function mockSend(e: ClientSendEvent): EncryptedMessage | null {
+export function mockSend(e: Extract<ClientSendEvent, { t: 'message.send' }>): EncryptedMessage | null {
   const me = current();
   const c = convs.find((x) => x.id === e.conversationId);
   if (!me || !c?.members.some((x) => x.userId === me.id)) return null;

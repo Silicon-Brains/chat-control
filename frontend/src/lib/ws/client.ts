@@ -5,6 +5,8 @@ import type { ClientSendEvent, ConnectionStatus, ServerEvent } from '@/types';
 type EventListener = (event: ServerEvent) => void;
 type StatusListener = (status: ConnectionStatus) => void;
 
+const HEARTBEAT_INTERVAL_MS = 25_000;
+
 /**
  * Single WebSocket with ticket auth, exponential backoff + full jitter,
  * and a tiny event bus. The ticket is one-time, so each (re)connect fetches a new one.
@@ -13,6 +15,7 @@ export class RealtimeClient {
   private socket: WebSocket | null = null;
   private attempts = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
   private running = false;
   private readonly events = new Set<EventListener>();
   private readonly statuses = new Set<StatusListener>();
@@ -27,6 +30,7 @@ export class RealtimeClient {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.stopHeartbeat();
     this.socket?.close(1000);
     this.socket = null;
     this.emitStatus('idle');
@@ -44,6 +48,7 @@ export class RealtimeClient {
 
   send(event: ClientSendEvent): boolean {
     if (env.mock) {
+      if (event.t === 'conversation.read') return true;
       void import('@/lib/api/mock').then(({ mockSend }) => {
         const msg = mockSend(event);
         if (msg) setTimeout(() => this.events.forEach((fn) => fn({ t: 'message.new', ...msg })), 60);
@@ -69,8 +74,20 @@ export class RealtimeClient {
       const socket = new WebSocket(`${env.wsUrl}?ticket=${encodeURIComponent(ticket)}`);
       this.socket = socket;
       socket.onopen = () => {
+        if (!this.running || this.socket !== socket) {
+          socket.close(1000);
+          return;
+        }
         this.attempts = 0;
         this.emitStatus('open');
+        this.heartbeat = setInterval(() => {
+          if (socket.readyState !== WebSocket.OPEN) return;
+          try {
+            socket.send(JSON.stringify({ t: 'ping' }));
+          } catch {
+            socket.close();
+          }
+        }, HEARTBEAT_INTERVAL_MS);
       };
       socket.onmessage = (msg: MessageEvent<string>) => {
         try {
@@ -81,14 +98,22 @@ export class RealtimeClient {
         }
       };
       socket.onclose = () => {
-        if (this.socket === socket) this.socket = null;
+        if (this.socket !== socket) return;
+        this.socket = null;
+        this.stopHeartbeat();
         this.emitStatus('closed');
         this.scheduleReconnect();
       };
+      socket.onerror = () => socket.close();
     } catch {
       this.emitStatus('closed');
       this.scheduleReconnect();
     }
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = null;
   }
 
   private scheduleReconnect(): void {

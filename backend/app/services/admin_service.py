@@ -20,6 +20,7 @@ from app.repositories.users import UserRepository
 from app.schemas.user import AdminStats
 from app.services.chat_service import ChatService
 from app.services.common import parse_uuid_cursor, utcnow
+from app.services.user_service import UserService
 
 
 class AdminService:
@@ -157,16 +158,7 @@ class AdminService:
         return user
 
     async def reset_key(self, actor: User, user_id: uuid.UUID, *, ip: str) -> None:
-        """Lost device: forget the user's public key so they can enrol a new one. Their direct chats are
-        deleted and their wrapped keys removed from groups/broadcasts (flagged ``rotationRequired``)."""
-        user = await self._target(user_id)
-        user.public_key = None
-        user.key_fingerprint = None
-        await self.chat.detach_user(user.id, remove_membership=False)
-        self.audit.add("user.reset_key", actor_id=actor.id, target_id=user.id, ip=ip)
-        await self.session.commit()
-        await self.c.hub.disconnect_user(user.id)
-        await self.chat.flush_notifications()
+        await UserService(self.session, self.c).reset_key(actor, user_id, ip=ip)
 
     async def revoke_sessions(self, actor: User, user_id: uuid.UUID, *, ip: str) -> int:
         user = await self._target(user_id)

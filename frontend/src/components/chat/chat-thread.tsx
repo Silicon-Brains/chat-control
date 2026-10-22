@@ -64,7 +64,9 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
   const last = messages[messages.length - 1];
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
-    if (last && last.senderId !== user.id) void conversationsApi.markRead(convId).catch(() => undefined);
+    if (last && last.senderId !== user.id && !realtime.send({ t: 'conversation.read', conversationId: convId })) {
+      void conversationsApi.markRead(convId).catch(() => undefined);
+    }
   }, [last?.id, convId, user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadOlder() {
@@ -74,14 +76,15 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
   }
 
   async function send(text: string): Promise<boolean> {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    upsert(convId, [{
+      id, conversationId: convId, senderId: user.id, keyVersion: conversation.currentKeyVersion,
+      createdAt: new Date(now).toISOString(), expiresAt: new Date(now + MESSAGE_TTL_MS).toISOString(),
+      text, status: 'pending',
+    }]);
     try {
-      const out = await prepareOutgoing(conversation, user.id, text);
-      const now = Date.now();
-      upsert(convId, [{
-        id: out.id, conversationId: convId, senderId: user.id, keyVersion: out.keyVersion,
-        createdAt: new Date(now).toISOString(), expiresAt: new Date(now + MESSAGE_TTL_MS).toISOString(),
-        text, status: 'pending',
-      }]);
+      const out = await prepareOutgoing(conversation, user.id, text, id);
       const ok = realtime.send({
         t: 'message.send', id: out.id, conversationId: convId,
         ciphertext: out.ciphertext, nonce: out.nonce, keyVersion: out.keyVersion,
@@ -93,6 +96,7 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
       }
       return true;
     } catch (e) {
+      useChatStore.getState().markFailed(convId, id);
       toast.error(e instanceof Error ? e.message : 'Message not sent.');
       return false;
     }

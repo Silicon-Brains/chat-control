@@ -13,3 +13,9 @@ export async function ensureDeviceKey(user: User): Promise<string> {
   }
   return identity.fingerprint;
 }
+
+export async function resetDeviceKey(user: User): Promise<string> {
+  const identity = await ensureIdentity(user.id);
+  await usersApi.resetKey(identity.publicKeyB64);
+  return identity.fingerprint;
+}
