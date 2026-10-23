@@ -42,7 +42,7 @@ export const useChatStore = create<ChatState>((set) => ({
           ...s.messages,
           [conversationId]: messages
             .map((message) =>
-              message.id === id ? { ...message, createdAt, expiresAt, status: 'ok' } : message,
+              message.id === id ? { ...message, createdAt, expiresAt, status: 'ok' as const } : message,
             )
             .sort(byTime),
         },
