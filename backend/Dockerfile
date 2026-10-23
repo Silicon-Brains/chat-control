@@ -18,6 +18,5 @@ USER app
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=4s --start-period=20s \
   CMD python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/livez',timeout=3).status==200 else 1)"
-# --no-access-log: the app writes its own access log WITHOUT query strings (WS tickets travel in the URL).
-# --ws-max-size caps a single WebSocket frame. Use WEB_CONCURRENCY>1 only together with REDIS_URL.
-CMD ["sh", "-c", "exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-1} --no-access-log --proxy-headers --forwarded-allow-ips='*' --ws-max-size 32768 --timeout-graceful-shutdown 15"]
+# The app writes its own access log without query strings.
+CMD ["sh", "-c", "exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-1} --no-access-log --proxy-headers --forwarded-allow-ips='*' --timeout-graceful-shutdown 15"]

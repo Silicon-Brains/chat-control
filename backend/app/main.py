@@ -1,4 +1,4 @@
-"""Application factory + lifespan (wires the Container, purge scheduler and WebSocket hub)."""
+"""Application factory + lifespan."""
 
 from __future__ import annotations
 
@@ -24,8 +24,6 @@ from app.core.rate_limit import build_rate_limiter
 from app.db.session import create_engine, create_session_factory
 from app.integrations.clerk import ClerkApi, ClerkClient, ClerkTokenVerifier
 from app.services.purge_service import PurgeService
-from app.ws.endpoint import router as ws_router
-from app.ws.hub import Hub, RedisEventBus
 
 log = logging.getLogger("app")
 
@@ -65,11 +63,6 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = create_engine(settings)
-        hub = Hub(settings)
-        bus = RedisEventBus(settings.redis_url, hub) if settings.redis_url else None
-        if bus:
-            hub.attach_bus(bus)
-            await bus.start()
         container = Container(
             settings=settings,
             engine=engine,
@@ -80,7 +73,6 @@ def create_app(
                 settings.clerk_issuer, jwks_url=settings.clerk_jwks_url, authorized_parties=settings.authorized_parties
             ),
             limiter=build_rate_limiter(settings.redis_url),
-            hub=hub,
         )
         app.state.container = container
 
@@ -95,9 +87,6 @@ def create_app(
         finally:
             stop.set()
             await asyncio.wait_for(task, timeout=10)
-            await hub.shutdown()
-            if bus:
-                await bus.stop()
             await container.limiter.close()
             await container.clerk.aclose()
             await engine.dispose()
@@ -128,7 +117,6 @@ def create_app(
     app.add_middleware(RequestContextMiddleware)
 
     app.include_router(api_router, prefix="/api/v1")
-    app.include_router(ws_router)
 
     @app.get("/livez", include_in_schema=False)
     async def livez() -> dict[str, str]:

@@ -20,7 +20,7 @@ src/
   components/ui|layout|auth|chat|admin
   lib/crypto/   keys (IndexedDB, non-extractable) · wrap (ECDH+HKDF+AES-GCM) · message (AES-GCM + AAD) · keyring
   lib/api/      fetch client (Clerk session token provider) + typed endpoints
-  lib/ws/       ticket-auth WebSocket, backoff + jitter, event bus
+  components/chat/database-sync-provider.tsx  conversation metadata polling
   lib/chat/     decrypt pipeline, outgoing prep, conversation creation (key wrapping)
   stores/       session · chat · toast      hooks/   types/   middleware.ts (Clerk route protection + CSP nonce)
 ```
@@ -46,7 +46,7 @@ src/
 Member add/remove + key rotation UI, broadcast-channel creation, message list virtualisation, Playwright e2e, browser notifications.
 
 ## Run without a backend (mock mode)
-Set `NEXT_PUBLIC_MOCK=true` in `.env.local` and restart `npm run dev`. The API and WebSocket are faked in the browser (`src/lib/api/mock.ts`); data resets on page reload and **must never be enabled in production**.
+Set `NEXT_PUBLIC_MOCK=true` in `.env.local` and restart `npm run dev`. The API is faked in the browser (`src/lib/api/mock.ts`); data resets on page reload and **must never be enabled in production**.
 
 | Where | Username | Code |
 |---|---|---|

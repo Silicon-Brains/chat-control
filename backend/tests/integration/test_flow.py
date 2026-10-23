@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import text
 
 from tests.fakes import OTHER_KEY, mint
-from tests.integration.conftest import API, Account, World, b64, grant, make_spki, recv_until, send_event
+from tests.integration.conftest import API, Account, World, b64, grant, make_spki
 
 pytestmark = pytest.mark.integration
 
@@ -58,7 +58,7 @@ def test_key_registration_and_directory(world: World) -> None:
     assert all("email" not in u for u in listing)  # directory never exposes e-mail addresses
 
 
-# ----------------------------------------------------------------- direct chat + realtime
+# ----------------------------------------------------------------- direct chat + database sync
 def test_direct_chat_end_to_end(world: World) -> None:
     c, alice, bob, carol = world.client, world.users["alice"], world.users["bob"], world.users["carol"]
     alice_key, bob_key = grant(alice.user_id), grant(bob.user_id)
@@ -82,36 +82,18 @@ def test_direct_chat_end_to_end(world: World) -> None:
     assert c.get(f"{API}/conversations/{cid}", headers=carol.auth).status_code == 404  # no existence oracle
     assert c.get(f"{API}/conversations/{cid}/messages", headers=carol.auth).status_code == 404
 
-    with (
-        c.websocket_connect(f"/ws?ticket={world.ticket(alice)}") as wa,
-        c.websocket_connect(f"/ws?ticket={world.ticket(bob)}") as wb,
-        c.websocket_connect(f"/ws?ticket={world.ticket(carol)}") as wc,
-    ):
-        for sock in (wa, wb, wc):
-            assert recv_until(sock, "ready")
-        mid = send_event(wa, cid)
-        ack = recv_until(wa, "message.ack")
-        assert ack["id"] == mid and ack["duplicate"] is False
-        got = recv_until(wb, "message.new")
-        assert got["id"] == mid and got["senderId"] == alice.user_id and got["keyVersion"] == 1
-        # idempotent retry: acked as duplicate, NOT delivered twice
-        send_event(wa, cid, client_id=mid)
-        assert recv_until(wa, "message.ack")["duplicate"] is True
-
-        # outsider cannot post, and nothing leaks to them
-        send_event(wc, cid)
-        err = recv_until(wc, "error")
-        assert err["error"]["code"] == "NOT_A_MEMBER"
-        # stale key version rejected with the current one
-        send_event(wa, cid, key_version=9)
-        assert recv_until(wa, "error")["error"]["details"]["currentKeyVersion"] == 1
-        # malformed frames
-        wa.send_text("not json")
-        assert recv_until(wa, "error")["error"]["code"] == "BAD_FRAME"
-        wa.send_json(
-            {"t": "message.send", "conversationId": cid, "keyVersion": 1, "ciphertext": "AAAA", "nonce": "AAAA"}
-        )
-        assert recv_until(wa, "error")["error"]["code"] == "BAD_FRAME"  # too short => schema bounds enforced
+    mid = str(uuid.uuid4())
+    payload = {"id": mid, "ciphertext": b64(b"c" * 32), "nonce": b64(b"n" * 12), "keyVersion": 1}
+    sent = c.post(f"{API}/conversations/{cid}/messages", headers=alice.auth, json=payload)
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["id"] == mid and sent.json()["senderId"] == alice.user_id
+    # REST retries with the client id are idempotent.
+    assert c.post(f"{API}/conversations/{cid}/messages", headers=alice.auth, json=payload).json()["id"] == mid
+    assert c.post(f"{API}/conversations/{cid}/messages", headers=carol.auth, json=payload).status_code == 403
+    stale = {**payload, "id": str(uuid.uuid4()), "keyVersion": 9}
+    assert c.post(f"{API}/conversations/{cid}/messages", headers=alice.auth, json=stale).json()["error"]["details"]["currentKeyVersion"] == 1
+    invalid = {**payload, "id": str(uuid.uuid4()), "ciphertext": "AAAA"}
+    assert c.post(f"{API}/conversations/{cid}/messages", headers=alice.auth, json=invalid).status_code == 422
 
     hist = c.get(f"{API}/conversations/{cid}/messages", headers=bob.auth).json()
     assert [m["id"] for m in hist["items"]] == [mid]
@@ -132,41 +114,29 @@ def test_direct_chat_end_to_end(world: World) -> None:
     assert timedelta(hours=9, minutes=59) < world.call(probe) <= timedelta(hours=10)
 
 
-def test_ws_ticket_is_single_use_and_origin_checked(world: World) -> None:
-    alice = world.users["alice"]
-    ticket = world.ticket(alice)
-    with world.client.websocket_connect(f"/ws?ticket={ticket}") as ws:
-        assert recv_until(ws, "ready")
-    with world.client.websocket_connect(f"/ws?ticket={ticket}") as ws:
-        with pytest.raises(Exception) as exc:
-            ws.receive_json()
-        assert "4401" in repr(exc.value) or getattr(exc.value, "code", None) == 4401
-    with pytest.raises(Exception):
-        with world.client.websocket_connect(
-            f"/ws?ticket={world.ticket(alice)}", headers={"origin": "https://evil.example"}
-        ):
-            pass
-
-
-def test_ws_rate_limit(world: World) -> None:
+def test_rest_message_rate_limit(world: World) -> None:
     c, alice, bob = world.client, world.users["alice"], world.users["bob"]
     cid = c.post(
         f"{API}/conversations",
         headers=alice.auth,
         json={"type": "direct", "members": [grant(alice.user_id), grant(bob.user_id)]},
     ).json()["id"]
-    with c.websocket_connect(f"/ws?ticket={world.ticket(alice)}") as ws:
-        recv_until(ws, "ready")
-        for _ in range(25):
-            send_event(ws, cid)
-        seen = []
-        for _ in range(60):
-            e = ws.receive_json()
-            if e["t"] in ("message.ack", "error"):
-                seen.append(e["t"] if e["t"] == "message.ack" else e["error"]["code"])
-            if len(seen) == 25:
-                break
-    assert "RATE_LIMITED" in seen and seen.count("message.ack") <= 20
+    world.call(c.app.state.container.limiter.delete, f"message:send:{alice.user_id}")
+    results = [
+        c.post(
+            f"{API}/conversations/{cid}/messages",
+            headers=alice.auth,
+            json={
+                "id": str(uuid.uuid4()),
+                "ciphertext": b64(b"c" * 32),
+                "nonce": b64(b"n" * 12),
+                "keyVersion": 1,
+            },
+        )
+        for _ in range(25)
+    ]
+    assert sum(response.status_code == 201 for response in results) == 20
+    assert results[-1].status_code == 429
 
 
 # ------------------------------------------------------------------ group + key rotation
@@ -247,20 +217,26 @@ def test_group_membership_and_key_rotation(world: World) -> None:
         json={"keyVersion": 1, "newKeys": [grant(alice.user_id)]},
     )
     assert bad.status_code == 422
-    with c.websocket_connect(f"/ws?ticket={world.ticket(bob)}") as wb:
-        recv_until(wb, "ready")
-        ok = c.request(
-            "DELETE",
-            f"{API}/conversations/{cid}/members/{carol.user_id}",
-            headers=alice.auth,
-            json={"keyVersion": 1, "newKeys": [grant(u.user_id) for u in (alice, bob, dave)]},
-        )
-        assert ok.status_code == 204, ok.text
-        assert recv_until(wb, "key.rotated")["keyVersion"] == 2
-        send_event(wb, cid, key_version=1)
-        assert recv_until(wb, "error")["error"]["code"] == "KEY_VERSION_STALE"
-        send_event(wb, cid, key_version=2)
-        assert recv_until(wb, "message.ack")
+    ok = c.request(
+        "DELETE",
+        f"{API}/conversations/{cid}/members/{carol.user_id}",
+        headers=alice.auth,
+        json={"keyVersion": 1, "newKeys": [grant(u.user_id) for u in (alice, bob, dave)]},
+    )
+    assert ok.status_code == 204, ok.text
+    assert len(c.get(f"{API}/conversations/{cid}/keys", headers=bob.auth).json()) == 2
+    stale_msg = c.post(
+        f"{API}/conversations/{cid}/messages",
+        headers=bob.auth,
+        json={"id": str(uuid.uuid4()), "ciphertext": b64(b"c" * 32), "nonce": b64(b"n" * 12), "keyVersion": 1},
+    )
+    assert stale_msg.status_code == 409 and stale_msg.json()["error"]["code"] == "KEY_VERSION_STALE"
+    fresh_msg = c.post(
+        f"{API}/conversations/{cid}/messages",
+        headers=bob.auth,
+        json={"id": str(uuid.uuid4()), "ciphertext": b64(b"c" * 32), "nonce": b64(b"n" * 12), "keyVersion": 2},
+    )
+    assert fresh_msg.status_code == 201
     assert c.get(f"{API}/conversations/{cid}/keys", headers=carol.auth).status_code == 404
     assert len(c.get(f"{API}/conversations/{cid}/keys", headers=bob.auth).json()) == 2
     assert (
@@ -321,53 +297,53 @@ def test_broadcast_only_senders_may_post(world: World) -> None:
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
     assert cid in {b["id"] for b in c.get(f"{API}/admin/broadcasts", headers=admin.auth).json()}
-    with (
-        c.websocket_connect(f"/ws?ticket={world.ticket(admin)}") as wa,
-        c.websocket_connect(f"/ws?ticket={world.ticket(bob)}") as wb,
-    ):
-        recv_until(wa, "ready"), recv_until(wb, "ready")
-        send_event(wb, cid)
-        assert recv_until(wb, "error")["error"]["code"] == "NOT_A_SENDER"
-        mid = send_event(wa, cid)
-        assert recv_until(wb, "message.new")["id"] == mid
+    denied = c.post(
+        f"{API}/conversations/{cid}/messages", headers=bob.auth,
+        json={"id": str(uuid.uuid4()), "ciphertext": b64(b"c" * 32), "nonce": b64(b"n" * 12), "keyVersion": 1},
+    )
+    assert denied.status_code == 403 and denied.json()["error"]["code"] == "NOT_A_SENDER"
+    sent = c.post(
+        f"{API}/conversations/{cid}/messages", headers=admin.auth,
+        json={"id": str(uuid.uuid4()), "ciphertext": b64(b"c" * 32), "nonce": b64(b"n" * 12), "keyVersion": 1},
+    )
+    assert sent.status_code == 201
+    assert sent.json()["id"] in [m["id"] for m in c.get(f"{API}/conversations/{cid}/messages", headers=bob.auth).json()["items"]]
 
 
 # ----------------------------------------------------------------------------- expiry
 def test_expired_messages_are_hidden_then_physically_deleted(world: World) -> None:
     c, alice, bob = world.client, world.users["alice"], world.users["bob"]
-    world.call(world.client.app.state.container.limiter.delete, f"ws:msg:{alice.user_id}")  # undo earlier flood test
+    world.call(world.client.app.state.container.limiter.delete, f"message:send:{alice.user_id}")
     cid = c.post(
         f"{API}/conversations",
         headers=alice.auth,
         json={"type": "direct", "members": [grant(alice.user_id), grant(bob.user_id)]},
     ).json()["id"]
-    with (
-        c.websocket_connect(f"/ws?ticket={world.ticket(alice)}") as wa,
-        c.websocket_connect(f"/ws?ticket={world.ticket(bob)}") as wb,
-    ):
-        recv_until(wa, "ready"), recv_until(wb, "ready")
-        mid = send_event(wa, cid)
-        recv_until(wb, "message.new")
+    sent = c.post(
+        f"{API}/conversations/{cid}/messages", headers=alice.auth,
+        json={"id": str(uuid.uuid4()), "ciphertext": b64(b"c" * 32), "nonce": b64(b"n" * 12), "keyVersion": 1},
+    )
+    assert sent.status_code == 201
+    mid = sent.json()["id"]
 
-        async def age_message():
-            async with world.client.app.state.container.session_factory() as s:
-                await s.execute(
-                    text("UPDATE messages SET expires_at = now() - interval '1 second' WHERE id = :i"),
-                    {"i": uuid.UUID(mid)},
-                )
-                await s.commit()
+    async def age_message():
+        async with world.client.app.state.container.session_factory() as s:
+            await s.execute(
+                text("UPDATE messages SET expires_at = now() - interval '1 second' WHERE id = :i"),
+                {"i": uuid.UUID(mid)},
+            )
+            await s.commit()
 
-        world.call(age_message)
-        # read path filters even before the purge job runs (correct even if the job lags)
-        assert mid not in [
-            m["id"] for m in c.get(f"{API}/conversations/{cid}/messages", headers=bob.auth).json()["items"]
-        ]
+    world.call(age_message)
+    # Reads filter expired rows immediately; purge removes them from Postgres.
+    assert mid not in [
+        m["id"] for m in c.get(f"{API}/conversations/{cid}/messages", headers=bob.auth).json()["items"]
+    ]
 
-        from app.services.purge_service import PurgeService
+    from app.services.purge_service import PurgeService
 
-        deleted = world.call(PurgeService(world.client.app.state.container).run_once)
-        assert deleted >= 1
-        assert mid in recv_until(wb, "message.expired")["ids"]
+    deleted = world.call(PurgeService(world.client.app.state.container).run_once)
+    assert deleted >= 1
 
     async def exists():
         async with world.client.app.state.container.session_factory() as s:
@@ -494,17 +470,11 @@ def test_disable_enable_reset_key_and_delete(world: World) -> None:
         json={"type": "direct", "members": [grant(zed.user_id), grant(bob.user_id)]},
     ).json()["id"]
 
-    with c.websocket_connect(f"/ws?ticket={world.ticket(zed)}") as ws:
-        recv_until(ws, "ready")
-        r = c.patch(f"{API}/admin/users/{zed.user_id}", headers=admin.auth, json={"status": "disabled"})
-        assert r.status_code == 200 and r.json()["status"] == "disabled"
-        with pytest.raises(Exception):  # socket is force-closed
-            for _ in range(5):
-                ws.receive_json()
+    r = c.patch(f"{API}/admin/users/{zed.user_id}", headers=admin.auth, json={"status": "disabled"})
+    assert r.status_code == 200 and r.json()["status"] == "disabled"
     assert ("ban", zed.clerk_id) in world.clerk.calls and zed.clerk_id in world.clerk.revoked_sessions
     denied = c.get(f"{API}/users/me", headers=zed.auth)
     assert denied.status_code == 403 and denied.json()["error"]["code"] == "ACCOUNT_DISABLED"
-    assert c.post(f"{API}/auth/ws-ticket", headers=zed.auth).status_code == 403
     assert c.patch(f"{API}/admin/users/{zed.user_id}", headers=admin.auth, json={"status": "active"}).status_code == 200
     assert c.get(f"{API}/users/me", headers=zed.auth).status_code == 200
 
@@ -616,8 +586,6 @@ def test_webhooks_sync_ban_role_and_deletion(world: World) -> None:
     assert c.post(hook, **_signed(world, ev, tamper=True)).status_code == 401
     assert c.post(hook, **_signed(world, ev, age=3600)).status_code == 401  # replayed/stale
     assert c.post(hook, content=b"{}", headers={"content-type": "application/json"}).status_code == 401
-    with c.websocket_connect(f"/ws?ticket={world.ticket(world.users['bob'])}"):
-        pass
     assert c.post(hook, **_signed(world, ev)).status_code == 204
     rows = c.get(f"{API}/admin/users?q=erin", headers=world.admin.auth).json()["items"]
     assert rows[0]["status"] == "disabled"  # mirrored without waiting for the TTL
@@ -636,7 +604,6 @@ def test_webhooks_sync_ban_role_and_deletion(world: World) -> None:
     pending_response = c.get(f"{API}/users/me", headers=direct_account.auth)
     assert pending_response.status_code == 403
     assert pending_response.json()["error"]["code"] == "APPROVAL_PENDING"
-    assert c.post(f"{API}/auth/ws-ticket", headers=direct_account.auth).status_code == 403
     direct_row = c.get(f"{API}/admin/users?q=direct-signup", headers=world.admin.auth).json()["items"][0]
     approved_direct = c.post(f"{API}/admin/users/{direct_row['id']}/approve", headers=world.admin.auth)
     assert approved_direct.status_code == 200

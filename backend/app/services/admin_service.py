@@ -136,7 +136,7 @@ class AdminService:
         return user
 
     async def set_status(self, actor: User, user_id: uuid.UUID, *, status: str, ip: str) -> User:
-        """Ban/unban in Clerk first (source of truth), then mirror locally and cut live connections."""
+        """Ban/unban in Clerk first (source of truth), then mirror locally."""
         user = await self._target(user_id)
         if user.status == UserStatus.PENDING:
             raise Conflict("Pending users must be approved or deleted", code="USER_NOT_PENDING")
@@ -153,8 +153,6 @@ class AdminService:
         user.synced_at = utcnow()
         self.audit.add("user.disable" if disable else "user.enable", actor_id=actor.id, target_id=user.id, ip=ip)
         await self.session.commit()
-        if disable:
-            await self.c.hub.disconnect_user(user.id)
         return user
 
     async def reset_key(self, actor: User, user_id: uuid.UUID, *, ip: str) -> None:
@@ -165,7 +163,6 @@ class AdminService:
         count = await self.c.clerk.revoke_user_sessions(user.clerk_user_id)
         self.audit.add("user.revoke_sessions", actor_id=actor.id, target_id=user.id, ip=ip, meta={"count": count})
         await self.session.commit()
-        await self.c.hub.disconnect_user(user.id)
         return count
 
     async def delete_user(self, actor: User, user_id: uuid.UUID, *, ip: str) -> None:
@@ -187,8 +184,6 @@ class AdminService:
         await self.chat.detach_user(user_id, remove_membership=True)
         await self.users.delete(user_id)
         await self.session.commit()
-        await self.c.hub.disconnect_user(user_id)
-        await self.chat.flush_notifications()
 
     # ------------------------------------------------------------- audit/stats
     async def audit_page(
@@ -214,7 +209,6 @@ class AdminService:
             users_active=counts["active"],
             users_disabled=counts["disabled"],
             live_messages=await self.msgs.count_live(),
-            ws_connections=self.c.hub.connection_count,
             conversations_total=await self.chat.count_conversations(),
             last_purge_at=state.last_run_at,
             last_purge_deleted=state.last_deleted,

@@ -1,5 +1,5 @@
 'use client';
-import { ArrowLeft, Lock, WifiOff } from 'lucide-react';
+import { ArrowLeft, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/ui/avatar';
@@ -11,7 +11,6 @@ import { canPost, conversationTitle } from '@/lib/chat/helpers';
 import { prepareOutgoing, toChatMessage } from '@/lib/chat/pipeline';
 import { serializeVoiceMessage } from '@/lib/chat/voice';
 import { MESSAGE_TTL_MS } from '@/lib/constants';
-import { realtime } from '@/lib/ws/client';
 import { useChatStore } from '@/stores/chat';
 import { useSession } from '@/stores/session';
 import { toast } from '@/stores/toast';
@@ -22,23 +21,49 @@ import { MessageBubble } from './message-bubble';
 
 const EMPTY: ChatMessage[] = [];
 
+function encodeMessageCursor(createdAt: string, id: string): string {
+  return btoa(`${createdAt}|${id}`).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
 export function ChatThread({ conversation }: { conversation: Conversation }) {
   const user = useSession((s) => s.user)!;
   const messages = useChatStore((s) => s.messages[conversation.id] ?? EMPTY);
-  const connection = useChatStore((s) => s.connection);
   const upsert = useChatStore((s) => s.upsert);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const wasOpen = useRef(false);
+  const syncCursor = useRef<string | null>(null);
+  const pollInFlight = useRef(false);
   const convId = conversation.id;
 
   const fetchPage = useCallback(async (cur: string | null) => {
     const page = await conversationsApi.messages(convId, cur);
     upsert(convId, await Promise.all(page.items.map(toChatMessage)));
+    if (cur === null && page.items[0]) {
+      syncCursor.current = encodeMessageCursor(page.items[0].createdAt, page.items[0].id);
+    }
     return page.nextCursor;
   }, [convId, upsert]);
+
+  const pollUpdates = useCallback(async () => {
+    if (loading || pollInFlight.current || document.visibilityState !== 'visible') return;
+    pollInFlight.current = true;
+    try {
+      const after = syncCursor.current;
+      if (!after) {
+        await fetchPage(null);
+        return;
+      }
+      const incoming = await conversationsApi.messageUpdates(convId, after);
+      if (!incoming.length) return;
+      upsert(convId, await Promise.all(incoming.map(toChatMessage)));
+      const latest = incoming[incoming.length - 1]!;
+      syncCursor.current = encodeMessageCursor(latest.createdAt, latest.id);
+    } finally {
+      pollInFlight.current = false;
+    }
+  }, [convId, fetchPage, loading, upsert]);
 
   // Initial history
   useEffect(() => {
@@ -52,21 +77,40 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
     return () => { cancelled = true; };
   }, [fetchPage]);
 
-  // After a reconnect, catch up on anything missed while offline.
+  // Refresh from the database while the conversation is open.
   useEffect(() => {
-    if (connection === 'open') {
-      if (wasOpen.current) void fetchPage(null).catch(() => undefined);
-      wasOpen.current = true;
-    }
-  }, [connection, fetchPage]);
+    let timer: number | undefined;
+    let cancelled = false;
+    const schedule = () => {
+      if (cancelled || document.visibilityState !== 'visible') return;
+      const startedAt = performance.now();
+      void pollUpdates()
+        .catch(() => undefined)
+        .finally(() => {
+          if (!cancelled && document.visibilityState === 'visible') {
+            timer = window.setTimeout(schedule, Math.max(0, 1_000 - (performance.now() - startedAt)));
+          }
+        });
+    };
+    const onVisibility = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = undefined;
+      if (document.visibilityState === 'visible') schedule();
+    };
+    schedule();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [pollUpdates]);
 
   // Mark read + stick to bottom when new messages arrive.
   const last = messages[messages.length - 1];
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
-    if (last && last.senderId !== user.id && !realtime.send({ t: 'conversation.read', conversationId: convId })) {
-      void conversationsApi.markRead(convId).catch(() => undefined);
-    }
+    if (last && last.senderId !== user.id) void conversationsApi.markRead(convId).catch(() => undefined);
   }, [last?.id, convId, user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadOlder() {
@@ -85,15 +129,8 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
     }]);
     try {
       const out = await prepareOutgoing(conversation, user.id, text, id);
-      const ok = realtime.send({
-        t: 'message.send', id: out.id, conversationId: convId,
-        ciphertext: out.ciphertext, nonce: out.nonce, keyVersion: out.keyVersion,
-      });
-      if (!ok) {
-        useChatStore.getState().markFailed(convId, out.id);
-        toast.error('You’re offline. Message not sent.');
-        return false;
-      }
+      const saved = await conversationsApi.sendMessage(convId, out);
+      useChatStore.getState().markSent(convId, id, saved.createdAt, saved.expiresAt);
       return true;
     } catch (e) {
       useChatStore.getState().markFailed(convId, id);
@@ -132,9 +169,6 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
           </h2>
           <p className="flex items-center gap-1 text-xs"><Lock className="h-3 w-3" aria-hidden />End-to-end encrypted · {conversation.members.length} members</p>
         </div>
-        {connection !== 'open' && (
-          <span className="inline-flex items-center gap-1 text-xs text-warning"><WifiOff className="h-3.5 w-3.5" aria-hidden />Reconnecting…</span>
-        )}
         {conversation.type === 'group' && conversation.myRole === 'owner' && (
           <GroupActions conversation={conversation} />
         )}

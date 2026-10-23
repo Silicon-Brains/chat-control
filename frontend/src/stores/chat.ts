@@ -1,10 +1,8 @@
 import { create } from 'zustand';
-import type { ChatMessage, ConnectionStatus } from '@/types';
+import type { ChatMessage } from '@/types';
 
 interface ChatState {
   messages: Record<string, ChatMessage[]>;
-  connection: ConnectionStatus;
-  setConnection: (s: ConnectionStatus) => void;
   upsert: (conversationId: string, incoming: ChatMessage[]) => void;
   markFailed: (conversationId: string, id: string) => void;
   markSent: (conversationId: string, id: string, createdAt: string, expiresAt: string) => void;
@@ -20,8 +18,6 @@ const byTime = (a: ChatMessage, b: ChatMessage) =>
 
 export const useChatStore = create<ChatState>((set) => ({
   messages: {},
-  connection: 'idle',
-  setConnection: (connection) => set({ connection }),
   upsert: (conversationId, incoming) =>
     set((s) => {
       const map = new Map((s.messages[conversationId] ?? []).map((m) => [m.id, m]));
@@ -44,9 +40,11 @@ export const useChatStore = create<ChatState>((set) => ({
       return {
         messages: {
           ...s.messages,
-          [conversationId]: messages.map((message) =>
-            message.id === id ? { ...message, createdAt, expiresAt, status: 'ok' } : message,
-          ),
+          [conversationId]: messages
+            .map((message) =>
+              message.id === id ? { ...message, createdAt, expiresAt, status: 'ok' } : message,
+            )
+            .sort(byTime),
         },
       };
     }),
@@ -86,5 +84,5 @@ export const useChatStore = create<ChatState>((set) => ({
       }
       return { messages: next };
     }),
-  reset: () => set({ messages: {}, connection: 'idle' }),
+  reset: () => set({ messages: {} }),
 }));

@@ -43,6 +43,7 @@ function ClerkUserGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { signOut } = useClerk();
   const { isLoaded, isSignedIn, getToken } = useAuth();
+  const sessionUser = useSession((state) => state.user);
   const [access, setAccess] = useState<AccessState>('checking');
   const [attempt, setAttempt] = useState(0);
 
@@ -74,10 +75,16 @@ function ClerkUserGate({ children }: { children: React.ReactNode }) {
     };
   }, [attempt, getToken, isLoaded, isSignedIn, router]);
 
-  if (!isLoaded || !isSignedIn || access === 'checking' || access === 'active') {
-    if (access === 'active') return <>{children}</>;
-    return <Spinner />;
-  }
+  // A 401 or logout can clear the app's local user while Clerk is still loading its
+  // sign-out transition. Revalidate instead of rendering children that dereference user.id.
+  useEffect(() => {
+    if (isLoaded && isSignedIn && access === 'active' && !sessionUser) {
+      setAttempt((value) => value + 1);
+    }
+  }, [access, isLoaded, isSignedIn, sessionUser]);
+
+  if (!isLoaded || !isSignedIn || access === 'checking') return <Spinner />;
+  if (access === 'active') return sessionUser ? <>{children}</> : <Spinner />;
 
   const pending = access === 'pending';
   return (

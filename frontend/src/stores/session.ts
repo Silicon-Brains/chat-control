@@ -4,7 +4,6 @@ import { authApi, type LoginResponse } from '@/lib/api/endpoints';
 import { ensureDeviceKey, resetDeviceKey } from '@/lib/auth/device-key';
 import { clearKeyring } from '@/lib/crypto';
 import { getQueryClient } from '@/lib/query-client';
-import { realtime } from '@/lib/ws/client';
 import type { User } from '@/types';
 import { useChatStore } from './chat';
 
@@ -110,7 +109,6 @@ export const useSession = create<SessionState>((set, get) => {
     },
 
     clearLocal: () => {
-      realtime.stop();
       setAccessToken(null);
       clearKeyring();
       useChatStore.getState().reset();

@@ -30,8 +30,6 @@ class WebhookService:
             except Forbidden:  # not invited: never provisioned, nothing to sync
                 log.info("ignored webhook for un-invited user")
                 return
-            if not user.is_active:
-                await self.c.hub.disconnect_user(user.id)
         elif event_type == "user.deleted" and data.get("id"):
             await AdminService(self.session, self.c).delete_local_by_clerk_id(str(data["id"]))
         else:

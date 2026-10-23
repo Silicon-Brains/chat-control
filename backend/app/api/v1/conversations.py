@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Query, Response, status
 
 from app.api.deps import ContainerDep, CurrentUser, SessionDep
+from app.core.rate_limit import enforce
 from app.schemas.conversation import (
     AddMembersRequest,
     ConversationCreated,
@@ -17,7 +18,7 @@ from app.schemas.conversation import (
     RotateKeyRequest,
     UpdateGroupRequest,
 )
-from app.schemas.message import MessageOut, MessagePage
+from app.schemas.message import MessageCreate, MessageOut, MessagePage
 from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -120,6 +121,19 @@ async def mark_read(
     return Response(status_code=NO_CONTENT)
 
 
+@router.get("/{conversation_id}/messages/updates", response_model=list[MessageOut])
+async def message_updates(
+    conversation_id: uuid.UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    container: ContainerDep,
+    after: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+) -> list[MessageOut]:
+    rows = await ChatService(session, container).updates(user, conversation_id, after=after, limit=limit)
+    return [MessageOut.model_validate(message) for message in rows]
+
+
 @router.get("/{conversation_id}/messages", response_model=MessagePage)
 async def history(
     conversation_id: uuid.UUID,
@@ -131,3 +145,24 @@ async def history(
 ) -> MessagePage:
     rows, nxt = await ChatService(session, container).history(user, conversation_id, cursor=cursor, limit=limit)
     return MessagePage(items=[MessageOut.model_validate(m) for m in rows], next_cursor=nxt)
+
+
+@router.post("/{conversation_id}/messages", response_model=MessageOut, status_code=status.HTTP_201_CREATED)
+async def send_message(
+    conversation_id: uuid.UUID, body: MessageCreate, user: CurrentUser, session: SessionDep, container: ContainerDep
+) -> MessageOut:
+    await enforce(
+        container.limiter,
+        f"message:send:{user.id}",
+        container.settings.message_rate_limit_per_window,
+        container.settings.message_rate_window_seconds,
+    )
+    result = await ChatService(session, container).send_message(
+        user.id,
+        conversation_id=conversation_id,
+        ciphertext=body.ciphertext,
+        nonce=body.nonce,
+        key_version=body.key_version,
+        client_id=body.id,
+    )
+    return MessageOut.model_validate(result.message)

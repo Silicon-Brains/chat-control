@@ -81,20 +81,17 @@ class ConversationRepository:
 
     async def get_for_send(
         self, conversation_id: uuid.UUID, user_id: uuid.UUID
-    ) -> tuple[Conversation | None, MemberRole | None, list[uuid.UUID]]:
+    ) -> tuple[Conversation | None, MemberRole | None]:
         stmt = (
-            select(Conversation, ConversationMember.user_id, ConversationMember.role)
+            select(Conversation, ConversationMember.role)
             .join(ConversationMember, ConversationMember.conversation_id == Conversation.id)
-            .where(Conversation.id == conversation_id)
+            .where(Conversation.id == conversation_id, ConversationMember.user_id == user_id)
             .with_for_update(read=True, of=Conversation)
         )
-        rows = (await self.session.execute(stmt)).all()
-        if not rows:
-            return None, None, []
-        conversation = rows[0][0]
-        member_role = next((role for _, uid, role in rows if uid == user_id), None)
-        member_ids = [uid for _, uid, _ in rows]
-        return conversation, member_role, member_ids
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            return None, None
+        return row[0], row[1]
 
     async def members(self, conversation_id: uuid.UUID) -> list[ConversationMember]:
         stmt = select(ConversationMember).where(ConversationMember.conversation_id == conversation_id)

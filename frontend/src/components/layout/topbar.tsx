@@ -3,6 +3,7 @@ import { Bell, LogOut } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
+import { useClerk } from '@clerk/nextjs';
 import { Avatar } from '@/components/ui/avatar';
 import { useConversations } from '@/hooks/use-conversations';
 import { env } from '@/lib/env';
@@ -10,6 +11,22 @@ import { useSession } from '@/stores/session';
 
 // Lazy so user pages never download Clerk.
 const AdminMenu = dynamic(() => import('@/components/admin/admin-menu').then((m) => m.AdminMenu), { ssr: false });
+
+function ClerkSignOutButton({ clearLocal }: { clearLocal: () => void }) {
+  const { signOut } = useClerk();
+  return (
+    <button
+      onClick={() => {
+        clearLocal();
+        void signOut({ redirectUrl: '/login' });
+      }}
+      aria-label="Sign out"
+      className="grid h-9 w-9 place-items-center rounded-full hover:bg-primary-500/10"
+    >
+      <LogOut className="h-4 w-4" aria-hidden />
+    </button>
+  );
+}
 
 export function Topbar({ title, greeting, admin }: { title: string; greeting?: string; admin?: boolean }) {
   const router = useRouter();
@@ -38,13 +55,15 @@ export function Topbar({ title, greeting, admin }: { title: string; greeting?: s
           <div className="glass flex items-center gap-2 !rounded-full py-1 pl-1 pr-2">
             <Avatar name={user.displayName} size={36} />
             <span className="hidden max-w-32 truncate text-sm font-medium text-ink-900 sm:inline">{user.displayName}</span>
-            <button
-              onClick={async () => { await signOut(); router.replace(admin ? '/admin/login' : '/login'); }}
-              aria-label="Sign out"
-              className="grid h-9 w-9 place-items-center rounded-full hover:bg-primary-500/10"
-            >
-              <LogOut className="h-4 w-4" aria-hidden />
-            </button>
+            {env.mock ? (
+              <button
+                onClick={async () => { await signOut(); router.replace(admin ? '/admin/login' : '/login'); }}
+                aria-label="Sign out"
+                className="grid h-9 w-9 place-items-center rounded-full hover:bg-primary-500/10"
+              >
+                <LogOut className="h-4 w-4" aria-hidden />
+              </button>
+            ) : <ClerkSignOutButton clearLocal={() => useSession.getState().clearLocal()} />}
           </div>
           )
         )}

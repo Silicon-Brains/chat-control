@@ -3,7 +3,7 @@ import { fingerprintOf } from '@/lib/crypto/keys';
 import { toB64 } from '@/lib/crypto/encoding';
 import { MESSAGE_TTL_MS } from '@/lib/constants';
 import type {
-  AdminUser, AuditEntry, ClientSendEvent, Conversation, DirectoryUser, EncryptedMessage, User, WrappedKey,
+  AdminUser, AuditEntry, Conversation, DirectoryUser, EncryptedMessage, User, WrappedKey,
 } from '@/types';
 import { ApiError, type RefreshResponse } from './client';
 
@@ -95,7 +95,10 @@ export async function mockRefresh(): Promise<RefreshResponse | null> {
   return u && u.status === 'active' ? { accessToken: 'mock-token', user: toUser(u) } : null;
 }
 
-export async function mockRequest<T>(path: string, opts: { method?: string; body?: unknown }): Promise<T> {
+export async function mockRequest<T>(
+  path: string,
+  opts: { method?: string; body?: unknown; query?: Record<string, string | number | undefined | null> },
+): Promise<T> {
   await (ready ??= seed());
   await new Promise((r) => setTimeout(r, 120)); // feel like a network
   const method = opts.method ?? 'GET';
@@ -121,7 +124,6 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
     return out({ accessToken: 'mock-token', user: toUser(u) });
   }
   if (path === '/auth/logout') { sessionStorage.removeItem(SESSION); return out(); }
-  if (path === '/auth/ws-ticket') { requireUser(); return out({ ticket: 'mock' }); }
 
   if (path === '/users') {
     requireUser();
@@ -207,7 +209,31 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
     if (!c?.members.some((x) => x.userId === me.id)) fail(404, 'NOT_FOUND', 'Not found');
     const now = Date.now();
     c!.messages = c!.messages.filter((x) => new Date(x.expiresAt).getTime() > now);
+    if (method === 'POST') {
+      const msg: EncryptedMessage = {
+        id: String(body.id), conversationId: c!.id, senderId: me.id, ciphertext: String(body.ciphertext),
+        nonce: String(body.nonce), keyVersion: Number(body.keyVersion), createdAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + MESSAGE_TTL_MS).toISOString(),
+      };
+      c!.messages.push(msg);
+      return out(msg);
+    }
     return out({ items: [...c!.messages].reverse(), nextCursor: null });
+  }
+  if ((m = path.match(/^\/conversations\/([^/]+)\/messages\/updates$/))) {
+    const me = requireUser();
+    const c = convs.find((x) => x.id === m![1]);
+    if (!c?.members.some((x) => x.userId === me.id)) fail(404, 'NOT_FOUND', 'Not found');
+    const rawCursor = opts.query?.after;
+    if (!rawCursor || typeof rawCursor !== 'string') return out([]);
+    const encoded = rawCursor.replace(/-/g, '+').replace(/_/g, '/');
+    const [timestamp, id] = atob(encoded + '='.repeat((4 - encoded.length % 4) % 4)).split('|');
+    const cursorAt = Date.parse(timestamp ?? '');
+    return out(c!.messages.filter((message) => {
+      const messageAt = Date.parse(message.createdAt);
+      return new Date(message.expiresAt).getTime() > Date.now()
+        && (messageAt > cursorAt || (messageAt === cursorAt && message.id > id!));
+    }).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).slice(0, 100));
   }
   if (/^\/conversations\/[^/]+\/read$/.test(path)) return out();
 
@@ -228,7 +254,6 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
       usersActive: users.filter((u) => u.role === 'user' && u.status === 'active').length,
       usersDisabled: users.filter((u) => u.role === 'user' && u.status === 'disabled').length,
       liveMessages: convs.reduce((sum, c) => sum + c.messages.length, 0),
-      wsConnections: 0,
       conversationsTotal: convs.length,
       lastPurgeAt: null,
       lastPurgeDeleted: null,
@@ -297,16 +322,3 @@ export async function mockRequest<T>(path: string, opts: { method?: string; body
   return fail(404, 'NOT_FOUND', `Mock: no handler for ${method} ${path}`);
 }
 
-/** Loopback for WebSocket sends: stores the ciphertext and returns the broadcast event. */
-export function mockSend(e: Extract<ClientSendEvent, { t: 'message.send' }>): EncryptedMessage | null {
-  const me = current();
-  const c = convs.find((x) => x.id === e.conversationId);
-  if (!me || !c?.members.some((x) => x.userId === me.id)) return null;
-  const now = Date.now();
-  const msg: EncryptedMessage = {
-    id: e.id, conversationId: c.id, senderId: me.id, ciphertext: e.ciphertext, nonce: e.nonce, keyVersion: e.keyVersion,
-    createdAt: new Date(now).toISOString(), expiresAt: new Date(now + MESSAGE_TTL_MS).toISOString(),
-  };
-  c.messages.push(msg);
-  return msg;
-}

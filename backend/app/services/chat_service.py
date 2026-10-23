@@ -21,6 +21,7 @@ from app.models import (
     ConversationKey,
     ConversationType,
     MemberRole,
+    Message,
     User,
     UserRole,
 )
@@ -72,7 +73,6 @@ def view_to_out(view: ConversationView) -> ConversationOut:
 class SendResult:
     message: StoredMessage
     duplicate: bool
-    member_ids: list[uuid.UUID]
 
 
 class ChatService:
@@ -84,7 +84,6 @@ class ChatService:
         self.msgs = MessageRepository(session)
         self.users = UserRepository(session)
         self.audit = AuditRepository(session)
-        self._pending: list[tuple[list[uuid.UUID], dict]] = []
 
     # ------------------------------------------------------------------ helpers
     async def _require_member(self, cid: uuid.UUID, user: User):  # type: ignore[no-untyped-def]
@@ -110,9 +109,6 @@ class ChatService:
                 code="KEY_VERSION_STALE",
                 details={"currentKeyVersion": conv.current_key_version},
             )
-
-    async def _notify(self, user_ids, payload: dict) -> None:  # type: ignore[no-untyped-def]
-        await self.c.hub.publish(user_ids, payload)
 
     async def _enrolled_users(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, User]:
         found = {u.id: u for u in await self.users.get_many(ids)}
@@ -191,9 +187,6 @@ class ChatService:
                 if existing:
                     return existing, False
             raise
-        await self._notify(
-            [u for u in grants if u != creator.id], {"t": "conversation.created", "conversationId": str(conv.id)}
-        )
         return conv, True
 
     # --------------------------------------------------------------------- read
@@ -216,27 +209,17 @@ class ChatService:
             conv.name = req.name
         if "group_icon" in req.model_fields_set:
             conv.group_icon = req.group_icon
-        members = await self.convs.member_ids(cid)
         self.audit.add("conversation.group_update", actor_id=actor.id, target_id=cid)
         await self.session.commit()
-        await self._notify(
-            [member_id for member_id in members if member_id != actor.id],
-            {"t": "conversation.updated", "conversationId": str(cid)},
-        )
         return await self.get_for_user(actor, cid)
 
     async def delete_group(self, actor: User, cid: uuid.UUID) -> None:
         conv = await self._locked_conversation(cid, actor, owner_only=True)
         if conv.type != ConversationType.GROUP:
             raise Conflict("Only groups can be deleted", code="NOT_A_GROUP")
-        members = await self.convs.member_ids(cid)
         await self.convs.delete(cid)
         self.audit.add("conversation.group_delete", actor_id=actor.id, target_id=cid)
         await self.session.commit()
-        await self._notify(
-            [member_id for member_id in members if member_id != actor.id],
-            {"t": "conversation.deleted", "conversationId": str(cid)},
-        )
 
     async def my_keys(self, user: User, cid: uuid.UUID) -> list[ConversationKey]:
         await self._require_member(cid, user)
@@ -252,6 +235,10 @@ class ChatService:
         page = rows[:limit]
         next_cursor = encode_cursor(page[-1].created_at, page[-1].id) if len(rows) > limit else None
         return page, next_cursor
+
+    async def updates(self, user: User, cid: uuid.UUID, *, after: str | None, limit: int) -> list[Message]:
+        await self._require_member(cid, user)
+        return await self.msgs.updates(cid, after=decode_cursor(after) if after else None, limit=limit)
 
     async def mark_read(self, user: User, cid: uuid.UUID) -> None:
         await self.mark_read_for_user(user.id, cid)
@@ -291,8 +278,6 @@ class ChatService:
         )
         self.audit.add("conversation.members_add", actor_id=actor.id, target_id=cid, meta={"count": len(new)})
         await self.session.commit()
-        await self._notify(list(existing), {"t": "conversation.updated", "conversationId": str(cid)})
-        await self._notify(list(new), {"t": "conversation.created", "conversationId": str(cid)})
 
     async def _rotate(self, conv: Conversation, remaining: list[uuid.UUID], keys: list[KeyGrant]) -> int:
         """Bump the version and store fresh wrapped keys. ``keys`` must cover every remaining
@@ -331,8 +316,6 @@ class ChatService:
         version = await self._rotate(conv, remaining, req.new_keys)
         self.audit.add("conversation.member_remove", actor_id=actor.id, target_id=cid, meta={"member": str(target_id)})
         await self.session.commit()
-        await self._notify(remaining, {"t": "key.rotated", "conversationId": str(cid), "keyVersion": version})
-        await self._notify([target_id], {"t": "conversation.removed", "conversationId": str(cid)})
 
     async def rotate_key(self, actor: User, cid: uuid.UUID, req: RotateKeyRequest) -> int:
         conv = await self._locked_conversation(cid, actor, owner_only=True)
@@ -343,7 +326,6 @@ class ChatService:
         version = await self._rotate(conv, members, req.keys)
         self.audit.add("conversation.key_rotate", actor_id=actor.id, target_id=cid)
         await self.session.commit()
-        await self._notify(members, {"t": "key.rotated", "conversationId": str(cid), "keyVersion": version})
         return version
 
     async def grant_keys(self, actor: User, cid: uuid.UUID, req: GrantKeysRequest) -> None:
@@ -364,7 +346,6 @@ class ChatService:
         )
         self.audit.add("conversation.key_grant", actor_id=actor.id, target_id=cid, meta={"count": len(targets)})
         await self.session.commit()
-        await self._notify(list(targets), {"t": "key.granted", "conversationId": str(cid)})
 
     # ----------------------------------------------- user lifecycle (admin flows)
     async def detach_user(self, user_id: uuid.UUID, *, remove_membership: bool) -> None:
@@ -374,31 +355,23 @@ class ChatService:
           direct chats, flag shared groups/broadcasts ``rotation_required``.
         * deletion   (remove_membership=True): additionally leave every group; owned groups pass
           to the longest-standing member (or are deleted when nobody is left).
-        Returns nothing; notifications are queued via ``self._pending``.
+        The clients observe these changes through database polling.
         """
         for cid, ctype, role in await self.convs.memberships_of_user(user_id):
             others = [u for u in await self.convs.member_ids(cid) if u != user_id]
             if ctype == ConversationType.DIRECT or not others:
                 await self.convs.delete(cid)
-                self._pending.append((others, {"t": "conversation.deleted", "conversationId": str(cid)}))
                 continue
             if remove_membership:
                 if role == MemberRole.OWNER:
                     if ctype != ConversationType.GROUP:
                         await self.convs.delete(cid)
-                        self._pending.append((others, {"t": "conversation.deleted", "conversationId": str(cid)}))
                         continue
                     heir = next(m for m in await self.convs.members(cid) if m.user_id != user_id)
                     await self.convs.set_member_role(cid, heir.user_id, MemberRole.OWNER)
                 await self.convs.remove_member(cid, user_id)
             await self.convs.delete_keys_for_user(user_id, cid)
             await self.convs.set_rotation_required([cid])
-            self._pending.append((others, {"t": "conversation.updated", "conversationId": str(cid)}))
-
-    async def flush_notifications(self) -> None:
-        for ids, payload in self._pending:
-            await self._notify(ids, payload)
-        self._pending = []
 
     # ------------------------------------------------------------------ message
     async def send_message(
@@ -411,8 +384,8 @@ class ChatService:
         key_version: int,
         client_id: uuid.UUID | None,
     ) -> SendResult:
-        # Lock and fetch membership + fan-out targets in one query.
-        conv, member_role, member_ids = await self.convs.get_for_send(conversation_id, user_id)
+        # Lock the conversation and validate the sender's membership in one query.
+        conv, member_role = await self.convs.get_for_send(conversation_id, user_id)
         if conv is None or member_role is None:
             raise Forbidden("You are not a member of this conversation", code="NOT_A_MEMBER")
         if conv.type == ConversationType.BROADCAST and member_role not in (MemberRole.OWNER, MemberRole.SENDER):
@@ -436,11 +409,11 @@ class ChatService:
             existing = await self.msgs.get(message_id)
             if existing and existing.sender_id == user_id and existing.conversation_id == conversation_id:
                 await self.session.commit()  # releases the share lock
-                return SendResult(existing, True, [])
+                return SendResult(existing, True)
             await self.session.commit()
             raise Conflict("Message id already in use", code="MESSAGE_ID_CONFLICT")
         await self.session.commit()
-        return SendResult(row, False, member_ids)
+        return SendResult(row, False)
 
     async def count_conversations(self) -> int:
         return int((await self.session.execute(select(func.count()).select_from(Conversation))).scalar_one())

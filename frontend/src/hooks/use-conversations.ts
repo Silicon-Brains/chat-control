@@ -15,7 +15,8 @@ export function useConversations() {
   return useQuery({
     queryKey: CONVERSATIONS_KEY,
     enabled: isUser && Boolean(userId) && keyReady,
-    refetchInterval: 60_000,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: false,
     queryFn: async (): Promise<Conversation[]> => {
       const list = await conversationsApi.list();
       if (userId) await Promise.all(list.map((c) => ensureKeys(userId, c)));

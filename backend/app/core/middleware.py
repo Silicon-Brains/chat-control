@@ -18,13 +18,13 @@ _RID_RE = re.compile(r"^[A-Za-z0-9\-_.]{8,64}$")
 
 class RequestContextMiddleware:
     """Assigns a request id and writes ONE access-log line (path only: never the query string,
-    which can carry one-time WS tickets)."""
+    which can carry credentials)."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in ("http", "websocket"):
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
         headers = dict(scope.get("headers") or [])
@@ -39,8 +39,6 @@ class RequestContextMiddleware:
             if message["type"] == "http.response.start":
                 status = message["status"]
                 message.setdefault("headers", []).append((b"x-request-id", rid.encode()))
-            elif message["type"] == "websocket.accept":
-                status = 101
             await send(message)
 
         try:
@@ -50,7 +48,7 @@ class RequestContextMiddleware:
                 "request",
                 extra={
                     "ctx": {
-                        "method": scope.get("method", "WS"),
+                        "method": scope.get("method", "HTTP"),
                         "path": scope.get("path"),
                         "status": status,
                         "ms": round((time.perf_counter() - started) * 1000, 1),

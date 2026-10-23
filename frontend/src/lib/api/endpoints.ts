@@ -23,7 +23,6 @@ export const authApi = {
   adminLogin: (body: { username: string; adminCode: string; totp: string }) =>
     api<LoginResponse>('/admin/auth/login', { method: 'POST', body, auth: false }),
   logout: () => api('/auth/logout', { method: 'POST' }),
-  wsTicket: () => api<{ ticket: string }>('/auth/ws-ticket', { method: 'POST' }),
 };
 
 export const usersApi = {
@@ -55,7 +54,11 @@ export const conversationsApi = {
       query: { cursor: cursor ?? undefined },
       signal,
     }),
+  messageUpdates: (id: string, after?: string | null, signal?: AbortSignal) =>
+    api<EncryptedMessage[]>(`/conversations/${id}/messages/updates`, { query: { after: after ?? undefined }, signal }),
   markRead: (id: string) => api(`/conversations/${id}/read`, { method: 'POST' }),
+  sendMessage: (id: string, body: { id: string; ciphertext: string; nonce: string; keyVersion: number }) =>
+    api<EncryptedMessage>(`/conversations/${id}/messages`, { method: 'POST', body }),
 };
 
 export interface CreatedUser {

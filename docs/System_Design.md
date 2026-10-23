@@ -5,13 +5,13 @@
 - **One-line description:** End-to-end encrypted chat with Clerk self-sign-up, admin-approved access and 10-hour auto-expiring messages.
 - **Target users:** Private teams/communities managed by admins.
 - **Core features:** Clerk self-sign-up with admin approval; 1:1, group and broadcast chat; E2EE; 10 h auto-clear.
-- **Expected scale (assumed):** ≤ 5,000 users, ≤ 1,000 concurrent WebSockets, ≤ 50 msg/s peak, ≤ ~2 M live message rows (10 h window).
-- **Tech stack:** Next.js 15 + Tailwind CSS; FastAPI + native WebSockets; Neon Postgres.
+- **Expected scale (assumed):** ≤ 5,000 users, ≤ 50 msg/s peak, ≤ ~2 M live message rows (10 h window).
+- **Tech stack:** Next.js 15 + Tailwind CSS; FastAPI REST API; Neon Postgres.
 - **Constraints:** Small team, security-first, low latency, no plaintext on server.
 
 ## 1. Overview
 **Purpose:** Private, closed, ephemeral messaging where the server cannot read content.
-**Goals:** closed membership; E2EE; hard 10 h retention; real-time (<300 ms p95); glass/3D UI.
+**Goals:** closed membership; E2EE; hard 10 h retention; responsive database polling; glass/3D UI.
 **Non-goals:** application access without approval, attachments, calls, search, message editing, forward secrecy (MVP), moderation of content (impossible under E2EE).
 
 ## 2. Requirements
@@ -19,10 +19,10 @@
 **Non-functional**
 | Attribute | Target |
 |---|---|
-| Latency | p95 send→receive < 300 ms; REST p95 < 150 ms |
+| Latency | REST p95 < 150 ms; open chat polls every 3 seconds |
 | Availability | 99.5% MVP |
 | Security | ASVS L2; ciphertext-only server; Clerk-verified sessions; approval-gated API access |
-| Scalability | 1k WS/instance; horizontal via Redis pub/sub |
+| Scalability | Horizontal API instances; shared rate limits via Redis |
 | Retention | Rows deleted ≤ 60 s after `expires_at` |
 
 ## 3. Assumptions & Constraints
@@ -41,38 +41,33 @@ flowchart LR
   subgraph Client[Browser - Next.js]
     UI[Glass UI] --> CR[WebCrypto E2EE]
     CR --> API[REST client]
-    CR --> WSC[WS client]
   end
   API -- HTTPS --> GW[TLS proxy / WAF]
-  WSC -- WSS --> GW
   GW --> APP
   subgraph APP[FastAPI]
     R[REST routers] --> S[Services]
-    W[WS Hub] --> S
     SCH[Purge scheduler] --> S
     S --> REPO[Repositories]
   end
   REPO --> DB[(Neon Postgres)]
-  W -. optional pub/sub .-> RD[(Redis)]
+  S -. optional rate limits .-> RD[(Redis)]
 ```
 
 ## 5. Component Design
 | Component | Responsibility | Interfaces | Depends on | Tech |
 |---|---|---|---|---|
-| Web UI | Pages, state, rendering | REST, WS | Crypto lib | Next.js, Tailwind, Zustand, TanStack Query |
+| Web UI | Pages, state, rendering, polling | REST | Crypto lib | Next.js, Tailwind, Zustand, TanStack Query |
 | Crypto lib | Keygen, wrap/unwrap, encrypt/decrypt | `encrypt(convId, text)` / `decrypt(msg)` | WebCrypto, IndexedDB | TypeScript |
-| Auth service | Verify Clerk sessions; mirror identity and approval state | `/auth/ws-ticket`, protected APIs | DB, Clerk JWKS | FastAPI |
+| Auth service | Verify Clerk sessions; mirror identity and approval state | protected APIs | DB, Clerk JWKS | FastAPI |
 | User admin service | Create/reset/disable users | `/admin/users*` | Auth, audit | FastAPI |
 | Chat service | Conversations, members, history | `/conversations*` | DB | FastAPI |
-| WS hub | Connections, fan-out, per-event authz | `/ws` | Chat service | Starlette WS |
-| Purge service | Delete expired rows/tokens/keys | internal (60 s) | DB | asyncio / APScheduler |
+| Purge service | Delete expired rows and keys | internal (60 s) | DB | asyncio / APScheduler |
 | Audit service | Append-only admin/security log | internal | DB | SQLAlchemy |
 | Rate limiter | Per-IP/per-user limits | middleware/deps | memory (or Redis) | custom / slowapi |
 
 ## 6. Data Design
 ```mermaid
 erDiagram
-  USERS ||--o{ WS_TICKETS : requests
   USERS ||--o{ CONVERSATION_MEMBERS : joins
   CONVERSATIONS ||--o{ CONVERSATION_MEMBERS : has
   CONVERSATIONS ||--o{ MESSAGES : contains
@@ -83,12 +78,12 @@ erDiagram
 ```
 - **DB choice:** Neon Postgres — managed, serverless, pooled, relational integrity for membership/authz, `bytea` for ciphertext. Full schema: database.md.
 - **Indexing:** `(conversation_id, created_at DESC, id)`, `(expires_at)`, `(user_id)` on members.
-- **Caching:** Not needed for MVP; in-memory LRU for membership lookups (30 s TTL) in WS hub.
+- **Caching:** TanStack Query caches REST responses briefly; Postgres is the source of truth for sync.
 - **Retention:** messages 10 h (DB-enforced default + purge); refresh tokens at expiry; old key versions 10 h after rotation; audit logs 90 days (no content).
 
 ## 7. API Design
-**Current authentication:** Clerk session JWTs are sent as `Authorization: Bearer <Clerk session JWT>`. Legacy local login and refresh-cookie examples in this section are superseded.
-Base `/api/v1`, JSON, versioned by path. Auth: `Authorization: Bearer <access>`; refresh via cookie.
+**Current authentication:** Clerk session JWTs are sent as `Authorization: Bearer <Clerk session JWT>`.
+Base `/api/v1`, JSON, versioned by path. Auth: `Authorization: Bearer <Clerk session JWT>`.
 
 **User registration and approval**
 ```http
@@ -109,14 +104,13 @@ POST /api/v1/conversations
 { "type":"group","name":"Team","members":[{"userId":"…","wrappedKey":"…","wrapperPub":"…"}] }
 → 201 { "id":"…","currentKeyVersion":1 }
 ```
-**WebSocket events** (`wss://…/ws?ticket=…`)
+**Live sync**
 ```json
-// client → server
-{ "t":"message.send","conversationId":"…","ciphertext":"<b64>","nonce":"<b64>","keyVersion":1 }
-// server → clients
-{ "t":"message.new","id":"…","conversationId":"…","senderId":"…","ciphertext":"…","nonce":"…","keyVersion":1,"createdAt":"…","expiresAt":"…" }
-{ "t":"message.expired","ids":["…"] }
-{ "t":"key.rotated","conversationId":"…","keyVersion":2 }
+POST /api/v1/conversations/{id}/messages
+{ "id":"…", "ciphertext":"<b64>", "nonce":"<b64>", "keyVersion":1 }
+
+GET /api/v1/conversations/{id}/messages?cursor=…
+Open chats poll every 3 seconds; conversation metadata polls every 10 seconds.
 ```
 Errors: `{ "error": { "code": "RATE_LIMITED", "message": "…" } }`.
 
@@ -141,18 +135,19 @@ sequenceDiagram
   U->>U: generate ECDH keypair (non-extractable, IndexedDB)
   U->>API: PUT /users/me/key (public key)
 ```
-**8.2 Send encrypted message**
+**8.2 Send and sync an encrypted message**
 ```mermaid
 sequenceDiagram
   participant S as Sender
-  participant WS as WS Hub
+  participant API as REST API
   participant DB as Neon
   participant R as Recipients
   S->>S: AES-GCM(convKey, nonce, plaintext)
-  S->>WS: message.send
-  WS->>WS: authz (member? sender role?), size, rate
-  WS->>DB: INSERT (expires_at = now()+10h)
-  WS-->>R: message.new (ciphertext)
+  S->>API: POST /conversations/{id}/messages
+  API->>API: authz (member? sender role?), size, rate
+  API->>DB: INSERT (expires_at = now()+10h)
+  R->>API: poll GET /conversations/{id}/messages
+  API-->>R: encrypted message history
   R->>R: decrypt with convKey
 ```
 **8.3 Auto-clear**
@@ -160,11 +155,9 @@ sequenceDiagram
 sequenceDiagram
   participant J as Purge job (60s)
   participant DB as Neon
-  participant WS as WS Hub
   participant C as Clients
   J->>DB: DELETE expired batch (SKIP LOCKED)
-  J->>WS: expired ids
-  WS-->>C: message.expired
+  C->>DB: next history poll excludes expired messages
   C->>C: remove from UI/memory
   Note over DB: reads also filter expires_at > now()
 ```
@@ -172,15 +165,14 @@ sequenceDiagram
 ## 9. Scalability & Performance
 | Bottleneck | Mitigation |
 |---|---|
-| WS connections | uvicorn workers; per-instance 1k; sticky LB |
-| Multi-instance fan-out | Redis pub/sub channel per conversation (Phase 11); *not* Neon LISTEN/NOTIFY (breaks under pooler) |
+| Polling load | Query only the open conversation and cap each history page |
 | History reads | Composite index + keyset pagination |
 | Purge cost | Batched deletes, `expires_at` index; optional daily partitions later (drop partition = O(1)) |
 | Neon cold start | Keep-alive ping; pooled endpoint; retry on connect |
 | Clerk validation | JWKS keys cached; identity sync has bounded TTL; admin role refresh is more frequent |
 
 ## 10. Reliability & Fault Tolerance
-- **WS drops:** client reconnect (backoff+jitter), fetch missed messages by cursor.
+- **Missed updates:** next poll reads durable Postgres state; history cursor supports paging.
 - **Purge lag/crash:** read filter guarantees correctness; startup catch-up purge.
 - **DB failover:** Neon HA; retries with idempotent message IDs (client-generated UUID).
 - **Backups:** Neon PITR window set **as short as plan allows** (message ciphertext in backups outlives 10 h otherwise); ciphertext only, so exposure is limited. Document this.
@@ -192,9 +184,9 @@ sequenceDiagram
 | User auth | Clerk session JWT; self-signups stay pending until explicit admin approval |
 | Admin auth | Clerk session JWT with server-managed admin metadata; MFA required |
 | Sessions | Clerk-managed; API validates RS256/JWKS signature, issuer, expiry and authorized party |
-| WS auth | one-time 30 s ticket; per-event membership authz |
+| API auth | Clerk session JWT and per-request membership authorization |
 | E2EE | ECDH P-256 (non-extractable) → HKDF → AES-256-GCM; per-conversation key wrapped per member; key rotation on member removal; key fingerprints shown for verification |
-| Transport | TLS 1.2+/HSTS, WSS only |
+| Transport | TLS 1.2+/HSTS, HTTPS only |
 | Web | strict CSP, no inline JS, text-only message rendering, CORS allow-list |
 | Secrets | env/secret manager; no secrets in repo; Clerk secret key stays server-side |
 | Logging | no bodies/tokens/codes; audit log for admin + failed logins |
@@ -215,7 +207,7 @@ sequenceDiagram
 
 ## 12. Infrastructure & Deployment
 - **Envs:** local, staging, prod (Neon branches).
-- **Containers:** Dockerfile per service; backend behind Caddy/Nginx (TLS, WS upgrade, rate limit).
+- **Containers:** Dockerfile per service; backend behind Caddy/Nginx (TLS, rate limit).
 - **Frontend:** Vercel or container.
 - **CI/CD:** GitHub Actions — lint, types, tests, `pip-audit`, `npm audit`, gitleaks, build, deploy.
 - **IaC:** Terraform/Pulumi (later); env via secret manager.
@@ -227,13 +219,13 @@ sequenceDiagram
 | Metrics | active WS, msgs/s, p95 latency, login failures, lockouts, purge lag, DB pool use |
 | Logs | request-id correlated; auth events; purge counts |
 | Traces | OpenTelemetry on REST + DB (sampled) |
-| Alerts | login-fail spike, purge lag > 5 min, WS error rate, 5xx > 1%, admin login from new IP |
+| Alerts | login-fail spike, purge lag > 5 min, API error rate, 5xx > 1%, admin login from new IP |
 
 ## 14. Trade-offs & Alternatives
 | Decision | Options | Chosen | Rationale |
 |---|---|---|---|
 | Architecture | Microservices / Monolith | Modular monolith | Small team, low latency |
-| Real-time | Raw TCP sockets / Socket.IO / native WS | Native WS | Browser-compatible, no extra layer |
+| Live sync | Database polling / database triggers | REST polling | Durable state, simple deployment, works across API instances |
 | E2EE protocol | Signal Double Ratchet / static ECDH + AES-GCM | Static ECDH + AES-GCM | Simpler for MVP; TTL limits exposure; ratchet later |
 | Group keys | Pairwise encrypt per recipient / shared key wrapped per member | Shared key wrapped | O(1) encrypt per message |
 | Login | Local credentials / identity provider | Clerk | Managed sessions, MFA and email verification; application access remains approval-gated |
@@ -244,7 +236,7 @@ sequenceDiagram
 ## 15. Risks & Open Questions
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Malicious signup | Unwanted account creation | Pending users are denied API/WebSocket access until reviewed |
+| Malicious signup | Unwanted account creation | Pending users are denied API access until reviewed |
 | Lost device = lost keys | Can't read history | Acceptable with 10 h TTL; admin re-enrol |
 | Neon backups retain ciphertext > 10 h | Retention expectation | Shortest PITR, document |
 | Browser E2EE trust (JS delivered by server) | Malicious JS risk | CSP, SRI, signed releases; native client later |
@@ -259,4 +251,4 @@ sequenceDiagram
 
 ## 17. Appendix
 **Glossary:** *E2EE* end-to-end encryption; *ECDH* elliptic-curve Diffie-Hellman; *HKDF* key derivation; *AES-GCM* authenticated encryption; *TTL* time-to-live; *TOTP* time-based one-time password; *Argon2id* memory-hard password hash.
-**References:** W3C WebCrypto API; OWASP ASVS & Cheat Sheets (Authentication, Session, WebSocket); RFC 5869 (HKDF); NIST SP 800-38D (GCM); Neon docs (pooling); FastAPI WebSocket docs.
+**References:** W3C WebCrypto API; OWASP ASVS & Cheat Sheets (Authentication, Session); RFC 5869 (HKDF); NIST SP 800-38D (GCM); Neon docs (pooling); FastAPI documentation.

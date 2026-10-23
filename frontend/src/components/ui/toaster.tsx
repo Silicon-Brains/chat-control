@@ -11,7 +11,7 @@ export function Toaster() {
           key={t.id}
           onClick={() => dismiss(t.id)}
           className={cn(
-            'glass pointer-events-auto animate-fade-up !rounded-tile px-4 py-3 text-sm font-medium text-ink-900',
+            'glass w-full max-w-lg pointer-events-auto animate-fade-up !rounded-tile whitespace-normal break-words px-4 py-3 text-left text-sm font-medium text-ink-900',
             t.tone === 'error' && 'border-danger/50 text-[#B8434D]',
           )}
         >

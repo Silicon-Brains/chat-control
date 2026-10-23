@@ -5,7 +5,6 @@ import base64
 import os
 import subprocess
 import sys
-import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
@@ -61,11 +60,6 @@ class World:
     def call(self, coro_fn, *args):  # run a coroutine on the app's event loop
         return self.client.portal.call(coro_fn, *args)
 
-    def ticket(self, acct: Account) -> str:
-        r = self.client.post(f"{API}/auth/ws-ticket", headers=acct.auth)
-        assert r.status_code == 200, r.text
-        return r.json()["ticket"]
-
     def make_user(self, name: str, *, enroll: bool = True, role: str | None = "user") -> Account:
         acct = Account(name, self.clerk.add_user(f"{name}@corp.test", role=role, first_name=name.title()))
         r = self.client.get(f"{API}/users/me", headers=acct.auth)  # first request provisions the local user
@@ -98,27 +92,4 @@ def world() -> Iterator[World]:
         yield w
 
 
-def recv_until(ws, kind: str, limit: int = 20) -> dict:
-    for _ in range(limit):
-        event = ws.receive_json()
-        if event.get("t") == kind:
-            return event
-    raise AssertionError(f"never received {kind}")
-
-
-def send_event(ws, conversation_id: str, key_version: int = 1, *, client_id: str | None = None, size: int = 40) -> str:
-    cid = client_id or str(uuid.uuid4())
-    ws.send_json(
-        {
-            "t": "message.send",
-            "id": cid,
-            "conversationId": conversation_id,
-            "keyVersion": key_version,
-            "ciphertext": b64(os.urandom(size)),
-            "nonce": b64(os.urandom(12)),
-        }
-    )
-    return cid
-
-
-__all__ = ["API", "Account", "World", "asyncio", "b64", "grant", "make_spki", "recv_until", "send_event"]
+__all__ = ["API", "Account", "World", "asyncio", "b64", "grant", "make_spki"]

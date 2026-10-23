@@ -43,12 +43,12 @@ Legend: `- [ ]` todo · `- [x]` done. Each phase ends with something runnable.
 **Tasks**
 - [x] Clerk session JWT verification, identity mirroring and Clerk admin bootstrap
 - [ ] Public Clerk sign-up, email verification and user/admin sign-in pages
-- [ ] Provision self-signups as pending; deny pending users on REST and WebSocket paths
+- [ ] Provision self-signups as pending; deny pending users on protected REST paths
 - [ ] Admin approval promotes a pending Clerk account; audit approval and rejection
 - [ ] Clerk-based route guards and MFA for admins
 **Dependencies:** Phases 2, 3
 **Expected result:** users can sign up and sign in, but cannot use the application before admin approval.
-**Done when:** pending access is denied across REST and WebSockets, approval activates access, and admin authorization tests pass.
+**Done when:** pending access is denied across REST, approval activates access, and admin authorization tests pass.
 
 ## Phase 5 — Admin User Management
 **Objective:** Admin review and approval of self-registered accounts.
@@ -76,20 +76,20 @@ Legend: `- [ ]` todo · `- [x]` done. Each phase ends with something runnable.
 **Objective:** Real-time encrypted chat.
 **Tasks**
 - [ ] Conversation REST (create/list/members) with membership checks
-- [ ] WebSocket hub, ticket auth, send/receive, fan-out
+- [x] Authenticated REST message writes and Postgres-backed polling sync
 - [ ] History pagination, unread counts, last_read
 - [ ] Chat UI (list, thread, composer, expiry countdown)
 - [ ] Group member add/remove → key rotation
 **Dependencies:** Phases 3, 4, 6
 **Expected result:** working chat across all three types.
-**Done when:** two browsers exchange encrypted messages; server DB shows only ciphertext.
+**Done when:** two browsers exchange encrypted messages through REST polling; server DB shows only ciphertext.
 
 ## Phase 8 — Auto-Clear (10 h TTL)
 **Objective:** Guaranteed ephemerality.
 **Tasks**
 - [ ] Purge scheduler (60 s, batched) + startup catch-up
 - [ ] Read-path `expires_at > now()` filter everywhere
-- [ ] WS `message.expired` event; client timers purge UI + memory
+- [x] Client timers prune expired messages; database polling excludes expired rows
 - [ ] Purge expired tokens/old key versions
 **Dependencies:** Phase 7
 **Expected result:** nothing older than 10 h is retrievable.
@@ -108,12 +108,12 @@ Legend: `- [ ]` todo · `- [x]` done. Each phase ends with something runnable.
 ## Phase 10 — Security Hardening & Testing
 **Tasks**
 - [ ] CSP/HSTS/headers, CORS tightening, cookie flags
-- [ ] Pen-test checklist (IDOR, XSS, CSRF, WS abuse, enumeration)
+- [ ] Pen-test checklist (IDOR, XSS, CSRF, API abuse, enumeration)
 - [ ] Load test (1k WS), dependency audit, Playwright e2e
 **Done when:** no high/critical findings; targets in PRD §8 met.
 
 ## Phase 11 — Optimization
-- [ ] Query plans reviewed, indexes verified; WS payload tuning
+- [ ] Query plans reviewed and indexes verified; polling load tuned
 - [ ] Bundle analysis; lazy-load heavy visuals
 - [ ] Optional Redis pub/sub for multi-instance fan-out
 

@@ -109,7 +109,6 @@ class AdminStats(CamelModel):
     users_active: int
     users_disabled: int
     live_messages: int
-    ws_connections: int
     conversations_total: int
     last_purge_at: datetime | None = None
     last_purge_deleted: int | None = None

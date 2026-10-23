@@ -15,7 +15,7 @@ const isUserArea = createRouteMatcher([
   '/settings(.*)',
 ]);
 
-const connectSrc = [process.env.NEXT_PUBLIC_API_URL, process.env.NEXT_PUBLIC_WS_URL].filter(
+const connectSrc = [process.env.NEXT_PUBLIC_API_URL].filter(
   (v): v is string => Boolean(v),
 );
 

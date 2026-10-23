@@ -8,8 +8,7 @@
 
 ## 2. ER Overview
 ```
-users ─┬─< ws_tickets
-       ├─< conversation_members >─ conversations ─< messages
+users ─┬─< conversation_members >─ conversations ─< messages
        ├─< conversation_keys (per member, per version)
        └─< audit_logs (actor)
 ```
@@ -31,12 +30,6 @@ users
  ├── created_by       uuid → users.id NULL
  ├── created_at       timestamptz NOT NULL DEFAULT now()
  └── last_login_at    timestamptz NULL
-
-ws_tickets
- ├── token_hash   bytea PK                      -- SHA-256 of one-time ticket
- ├── user_id      uuid → users.id ON DELETE CASCADE
- ├── expires_at   timestamptz NOT NULL
- └── created_at   timestamptz DEFAULT now()
 
 conversations
  ├── id              uuid PK
@@ -97,7 +90,6 @@ audit_logs
 | `messages (conversation_id, created_at DESC, id)` | history pagination |
 | `messages (expires_at)` | purge job |
 | `conversation_members (user_id)` | list my chats |
-| `ws_tickets (expires_at)` | purge expired one-time tickets |
 | `audit_logs (created_at DESC)` | admin view |
 | `users (username)` unique | login |
 
@@ -119,7 +111,7 @@ JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.us
 WHERE m.expires_at > now() AND m.created_at > coalesce(cm.last_read_at,'-infinity')
   AND m.sender_id <> $1 GROUP BY 1;
 ```
-Also purge: expired `ws_tickets`, superseded `conversation_keys` older than 10 h.
+Also purge superseded `conversation_keys` older than 10 h.
 
 ## 7. Seed Data
 - 1 admin (via CLI only, never SQL seed in prod).

@@ -10,7 +10,6 @@ from app.core.errors import RateLimited
 from app.core.ids import uuid7
 from app.core.rate_limit import InMemoryRateLimiter, enforce, ensure_not_blocked
 from app.core.request import client_ip
-from app.core.security import hash_token, new_opaque_token
 
 BASE = dict(database_url="postgresql://u:p@h/db", clerk_secret_key="sk_test_x", clerk_issuer="https://c.example.com")
 
@@ -46,11 +45,6 @@ def test_uuid7_is_time_ordered() -> None:
     ids = [uuid7() for _ in range(50)]
     assert all(i.version == 7 for i in ids)
     assert [i.int >> 80 for i in ids] == sorted(i.int >> 80 for i in ids)
-
-
-def test_opaque_tokens() -> None:
-    raw, digest = new_opaque_token()
-    assert digest == hash_token(raw) and len(digest) == 32 and new_opaque_token()[0] != raw
 
 
 async def test_rate_limiter() -> None:

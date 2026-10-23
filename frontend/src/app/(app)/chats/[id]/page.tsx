@@ -1,5 +1,5 @@
 'use client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import { ChatThread } from '@/components/chat/chat-thread';
 import { Button } from '@/components/ui/button';
@@ -10,14 +10,21 @@ import { ApiError } from '@/lib/api/client';
 import { ensureKeys } from '@/lib/crypto';
 import { SearchX } from 'lucide-react';
 import { useSession } from '@/stores/session';
+import type { Conversation } from '@/types';
 
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>();
   const userId = useSession((s) => s.user?.id);
   const keyReady = useSession((s) => s.keyReady);
+  const queryClient = useQueryClient();
+  const cachedConversation = queryClient
+    .getQueryData<Conversation[]>(['conversations'])
+    ?.find((item) => item.id === id);
   const { data: conversation, isPending, isError, error, refetch } = useQuery({
     queryKey: ['conversation', id],
     enabled: Boolean(id && userId && keyReady),
+    initialData: cachedConversation,
+    initialDataUpdatedAt: queryClient.getQueryState(['conversations'])?.dataUpdatedAt,
     queryFn: async () => {
       if (!userId) throw new Error('Your session is not ready.');
       const result = await conversationsApi.get(id);

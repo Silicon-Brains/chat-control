@@ -12,7 +12,7 @@ Teams/groups that need private communication have no control over who joins, and
 - Public Clerk sign-up with admin approval required before any application access.
 - E2EE for every conversation type.
 - Ephemeral history: 10-hour TTL, enforced server-side.
-- Fast real-time delivery (WebSocket).
+- Live message and conversation updates through database polling.
 - Distinctive 3D/glassmorphism UI matching the reference dashboard image.
 
 ## 4. Target Users
@@ -32,12 +32,12 @@ Small to mid-size private groups (company teams, communities, project groups) ma
 5. **One-to-Many**: (a) **Group chat** (many ↔ many), (b) **Broadcast channel** (one sender → many read-only receivers). *Assumption — see Open Questions.*
 6. **End-to-End Encryption** — client-side keys, server stores ciphertext only.
 7. **Auto-clear after 10 hours** — server purge + client purge + expiry countdown in UI.
-8. **Real-time messaging** over WebSockets.
+8. **Live messaging** through authenticated REST writes and Postgres-backed polling.
 9. **Voice messages** — record, preview, and send encrypted audio notes up to 30 seconds.
 10. **Admin dashboard** — users, active sessions, audit log, security status.
 
 ## 7. Functional Requirements
-- FR1: Only authenticated admins can call user-management endpoints; only approved users can use chat APIs or WebSockets.
+- FR1: Only authenticated admins can call user-management endpoints; only approved users can use chat APIs.
 - FR2: New Clerk accounts are mirrored as `pending`; they receive no application access before approval.
 - FR3: Admin approval sets the Clerk user role and activates the local account; rejection deletes the registration.
 - FR4: Admin can disable/enable/delete a user and reset a device key.
@@ -54,7 +54,7 @@ Small to mid-size private groups (company teams, communities, project groups) ma
 | Area | Target |
 |---|---|
 | Latency | p95 message delivery < 300 ms (same region) |
-| Throughput | 1,000 concurrent WebSocket connections per instance |
+| Sync delay | Messages poll every 3 seconds in an open chat; conversation metadata every 10 seconds |
 | Availability | 99.5% (MVP) |
 | Security | OWASP ASVS L2 as baseline; see rules.md |
 | Retention | Hard delete ≤ 60 s after expiry |
@@ -68,13 +68,13 @@ Small to mid-size private groups (company teams, communities, project groups) ma
 
 ## 10. User Journeys
 - **Onboarding:** User signs up and verifies email → account is pending → admin approves → user signs in → browser generates keypair → public key uploaded → ready.
-- **Send message:** open chat → type or record a voice note → encrypt locally → WS send → server stores ciphertext + `expires_at` → fan-out → recipients decrypt.
+- **Send message:** open chat → type or record a voice note → encrypt locally → authenticated REST write → Postgres stores ciphertext + `expires_at` → recipients poll history and decrypt.
 - **Expiry:** message shows countdown; at 10 h it disappears everywhere.
 - **Lost device:** admin regenerates code → user logs in on new device → new keypair (old messages already expired or unreadable).
 
 ## 11. Authentication Requirements
 - Clerk handles user/admin sign-up, sign-in, email verification, MFA and session rotation.
-- User sign-up is available publicly, but new accounts stay pending and cannot use REST chat endpoints or WebSockets until approved.
+- User sign-up is available publicly, but new accounts stay pending and cannot use REST chat endpoints until approved.
 - Clerk `public_metadata.role` is server-managed: `user` after admin approval and `admin` only through a trusted bootstrap/admin process. Client-set metadata is never trusted.
 - Require verified email for users and MFA for admins. The API validates Clerk JWT signature (RS256/JWKS), issuer, expiry, authorized party and session state.
 - Pending and disabled accounts receive generic, explicit access-denied states; admin approval/rejection actions are audited.
@@ -83,7 +83,7 @@ Small to mid-size private groups (company teams, communities, project groups) ma
 Review and approve/reject pending users; disable/enable/delete users; reset device keys; revoke sessions; view audit log; create broadcast channels.
 
 ## 13. API Requirements
-REST (`/api/v1`) for auth, users, conversations, history; WebSocket (`/ws`) for real-time. Full spec in System_Design.md.
+REST (`/api/v1`) for users, conversations, message writes, and history polling. Full spec in System_Design.md.
 
 ## 14. Notifications
 In-app unread badges and (optional, Phase 2) browser notifications with generic text ("New message") — never content.

@@ -32,16 +32,16 @@
 ## 6. Security Rules (critical)
 **DO**
 - Let Clerk handle passwords, email verification, MFA and sessions; verify Clerk JWTs (RS256/JWKS, issuer, expiry, authorized party).
-- Allow direct Clerk sign-up, but create local accounts as `pending` and deny API/WebSocket access until explicit admin approval.
+- Allow direct Clerk sign-up, but create local accounts as `pending` and deny API access until explicit admin approval.
 - Set Clerk public role metadata only from trusted backend/admin bootstrap paths; never trust client-supplied role claims.
 - Require verified email for users and MFA for admins.
 - Audit registration, approval, rejection, disable/enable and delete actions.
 - Encrypt in browser; private key `extractable: false`; store only in IndexedDB.
 - When local key storage is lost, require explicit confirmation before self-service key reset; reset removes the user's wrapped conversation keys and requires group-key rotation.
-- Validate membership on every REST call **and** every WS event.
+- Validate membership on every REST call.
 - Set headers: strict CSP (no inline scripts, nonces), HSTS, `X-Content-Type-Options`, `Referrer-Policy: no-referrer`, `frame-ancestors 'none'`.
 - Strict CORS allow-list; cookies `HttpOnly; Secure; SameSite=Strict`.
-- Cap message ciphertext at 256 KiB; voice notes are limited to 30 seconds and 160 KiB before encryption. WS rate limit 20 msgs / 10 s.
+- Cap message ciphertext at 256 KiB; voice notes are limited to 30 seconds and 160 KiB before encryption. Message sends are limited to 20 per user every 10 seconds.
 - Record voice notes in the browser and encrypt them with the conversation key before sending; never upload raw audio.
 - Write audit logs for all admin actions and failed logins (no content, no secrets).
 - Pin and audit dependencies (`pip-audit`, `npm audit`) in CI.
@@ -56,7 +56,7 @@
 
 ## 7. Authentication Rules
 - Clerk owns credentials and web sessions. The API accepts only verified Clerk session JWTs.
-- Pending or disabled local accounts cannot use REST or WebSocket endpoints.
+- Pending or disabled local accounts cannot use protected REST endpoints.
 - Approval writes `public_metadata.role=user` through Clerk's Backend API and changes the local account to active; approval is auditable.
 - `public_metadata.role=admin` is granted only through a trusted bootstrap/admin operation.
 - WS: exchange an approved Clerk session for a one-time ticket (30 s TTL), consumed on connect.
@@ -65,12 +65,12 @@
 ## 8. Environment Variables
 - `.env` never committed; `.env.example` lists names only.
 - Required: `DATABASE_URL`, `DATABASE_URL_DIRECT`, `CLERK_SECRET_KEY`, `CLERK_ISSUER`, `ALLOWED_ORIGINS`, `ENV`.
-- Frontend exposes only `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`.
+- Frontend exposes `NEXT_PUBLIC_API_URL` for authenticated API requests and database polling.
 - No secret may appear in `NEXT_PUBLIC_*`.
 
 ## 9. Error Handling
 - Backend: global exception handlers; log with request-id; return safe messages.
-- Frontend: error boundaries per route; toast for recoverable errors; WS reconnect with exponential backoff + jitter.
+- Frontend: error boundaries per route; toast for recoverable errors; poll database-backed chat data while visible.
 
 ## 10. Validation
 - Pydantic v2 `extra="forbid"` on all inputs; Zod on frontend forms.
@@ -85,17 +85,17 @@
 - PR required; CI (lint, types, tests, audit) must pass. No secrets in history (use gitleaks pre-commit).
 
 ## 13. Dependencies
-- Add only when necessary; justify in PR. Prefer platform APIs (WebCrypto, native WebSocket).
+- Add only when necessary; justify in PR. Prefer platform APIs (WebCrypto, Fetch).
 - Pin versions; lockfiles committed.
 
 ## 14. Performance
 - Index every query path; no N+1 (use joins/`selectinload`).
 - Paginate history (50). Virtualize long message lists.
 - Lazy-load 3D/heavy visuals; images via `next/image`; keep JS bundle lean.
-- WS payloads compact; batch receipts.
+- Keep polling scoped to open conversations and use cursor pagination for message history.
 
 ## 15. Testing
-- Backend: pytest + httpx; cover Clerk token validation, pending-to-approved lifecycle, authz, purge, WS membership.
+- Backend: pytest + httpx; cover Clerk token validation, pending-to-approved lifecycle, authz, message polling, and purge.
 - Frontend: Vitest for crypto utils (round-trip, tamper detection); Playwright for login → send → expiry flows.
 - Security tests: IDOR checks, brute-force lockout, token reuse, CSP presence.
 - Minimum 80% coverage on `services/` and `lib/crypto/`.

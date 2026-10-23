@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.core.rate_limit import RateLimiter
 from app.integrations.clerk import ClerkApi, ClerkTokenVerifier
-from app.ws.hub import Hub
 
 
 @dataclass
@@ -27,5 +26,4 @@ class Container:
     clerk: ClerkApi
     verifier: ClerkTokenVerifier
     limiter: RateLimiter
-    hub: Hub
     purge_state: PurgeState = field(default_factory=PurgeState)

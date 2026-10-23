@@ -70,6 +70,10 @@ export function Composer({
 
   async function startRecording() {
     if (recording || busy || disabled || text.trim()) return;
+    if (!window.isSecureContext) {
+      toast.error('Microphone access requires a secure HTTPS connection (localhost is allowed).');
+      return;
+    }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       toast.error('Voice messages are not supported by this browser.');
       return;
@@ -140,10 +144,18 @@ export function Composer({
         () => stopRecording(),
         MAX_VOICE_DURATION_SECONDS * 1000,
       );
-    } catch {
+    } catch (error) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
-      toast.error('Couldn’t access your microphone. Allow microphone access and try again.');
+      const name = error instanceof Error ? error.name : '';
+      const message = name === 'NotAllowedError' || name === 'SecurityError'
+        ? 'Microphone access was blocked. Allow it in your browser’s site settings, then try again.'
+        : name === 'NotFoundError'
+          ? 'No microphone was found. Connect or enable a microphone, then try again.'
+          : name === 'NotReadableError'
+            ? 'Your microphone is unavailable. Close other apps using it, then try again.'
+            : 'Couldn’t start microphone recording. Check your browser and microphone settings, then try again.';
+      toast.error(message);
     }
   }
 

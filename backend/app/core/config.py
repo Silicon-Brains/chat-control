@@ -41,7 +41,6 @@ class Settings(BaseSettings):
     clerk_sync_ttl_seconds: int = 300  # how long a mirrored profile/role is trusted
     clerk_admin_sync_ttl_seconds: int = 60  # admin endpoints re-check role/ban at most this stale
     invitation_redirect_url: str | None = None  # where invitees land to finish sign-up
-    ws_ticket_ttl_seconds: int = 30
 
     # --- web ---------------------------------------------------------------
     allowed_origins: str = "http://localhost:3000"
@@ -49,18 +48,12 @@ class Settings(BaseSettings):
     trusted_proxy_count: int = 1
     admin_ip_allowlist: str = ""
     max_request_body_bytes: int = 262_144
-    ticket_rate_limit_per_minute: int = 30
 
     # --- chat limits -------------------------------------------------------
     max_group_size: int = 200
     allow_user_group_creation: bool = True
-    ws_max_connections_total: int = 1500
-    ws_max_connections_per_user: int = 5
-    ws_send_queue_size: int = 256
-    ws_idle_timeout_seconds: int = 90
-    ws_max_frame_bytes: int = 384 * 1024
-    ws_rate_limit_messages: int = 20
-    ws_rate_limit_window_seconds: int = 10
+    message_rate_limit_per_window: int = 20
+    message_rate_window_seconds: int = 10
 
     # --- purge -------------------------------------------------------------
     purge_interval_seconds: int = 60

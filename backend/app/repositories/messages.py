@@ -89,6 +89,20 @@ class MessageRepository:
             stmt = stmt.where(tuple_(Message.created_at, Message.id) < tuple_(before[0], before[1]))
         return list((await self.session.execute(stmt)).scalars())
 
+    async def updates(
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        after: tuple[datetime, uuid.UUID] | None,
+        limit: int,
+    ) -> list[Message]:
+        """Return only newer, live messages in ascending order for efficient polling."""
+        stmt = select(Message).where(Message.conversation_id == conversation_id, Message.expires_at > func.now())
+        if after:
+            stmt = stmt.where(tuple_(Message.created_at, Message.id) > tuple_(after[0], after[1]))
+        stmt = stmt.order_by(Message.created_at, Message.id).limit(limit)
+        return list((await self.session.execute(stmt)).scalars())
+
     async def delete_expired_batch(self, limit: int) -> list[tuple[uuid.UUID, uuid.UUID]]:
         victims = (
             select(Message.id)

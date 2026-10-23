@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { AuthGate } from '@/components/auth/auth-gate';
-import { RealtimeProvider } from '@/components/chat/realtime-provider';
+import { DatabaseSyncProvider } from '@/components/chat/database-sync-provider';
 import { AppShell } from '@/components/layout/app-shell';
 import { userNav } from '@/components/layout/nav-config';
 import { Button } from '@/components/ui/button';
@@ -62,9 +62,9 @@ function KeyGuard({ children }: { children: React.ReactNode }) {
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthGate role="user">
-      <RealtimeProvider>
+      <DatabaseSyncProvider>
         <AppShell nav={userNav}><KeyGuard>{children}</KeyGuard></AppShell>
-      </RealtimeProvider>
+      </DatabaseSyncProvider>
     </AuthGate>
   );
 }

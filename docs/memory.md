@@ -33,7 +33,6 @@ None (no code yet).
 |---|---|---|
 | D1 | Name: VaultChat (placeholder) | User gave no name |
 | D2 | Modular monolith (FastAPI) + Next.js 15 + Tailwind + Neon | Matches requested stack; simple, fast |
-| D3 | "Python socket programming" → FastAPI native WebSockets | Async, browser-compatible; raw TCP sockets cannot be used from browsers |
 | D4 | E2EE via WebCrypto (ECDH P-256 + AES-256-GCM), per-conversation key wrapped per member | Uniform for 1:1, group, broadcast |
 | D5 | Clerk handles user credentials and sessions; new users remain pending until admin approval | Centralized identity, email verification and managed sessions |
 | D6 | Admin login uses Clerk with required MFA; admin role is server-managed | Admin is the highest-value target |

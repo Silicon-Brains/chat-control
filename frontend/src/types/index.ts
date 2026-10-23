@@ -41,7 +41,6 @@ export interface AdminStats {
   usersActive: number;
   usersDisabled: number;
   liveMessages: number;
-  wsConnections: number;
   conversationsTotal: number;
   lastPurgeAt: string | null;
   lastPurgeDeleted: number | null;
@@ -115,25 +114,3 @@ export interface Page<T> {
   nextCursor: string | null;
 }
 
-export type ServerEvent =
-  | ({ t: 'message.new' } & EncryptedMessage)
-  | { t: 'message.ack'; id: string; conversationId: string; createdAt: string; expiresAt: string; duplicate: boolean }
-  | { t: 'message.expired'; ids: string[] }
-  | { t: 'conversation.created' | 'conversation.removed'; conversationId: string }
-  | { t: 'conversation.updated' | 'conversation.deleted'; conversationId: string }
-  | { t: 'key.granted'; conversationId: string }
-  | { t: 'key.rotated'; conversationId: string; keyVersion: number }
-  | { t: 'error'; ref?: string | null; error: { code: string; message: string } };
-
-export type ClientSendEvent =
-  | {
-      t: 'message.send';
-      id: string;
-      conversationId: string;
-      ciphertext: string;
-      nonce: string;
-      keyVersion: number;
-    }
-  | { t: 'conversation.read'; conversationId: string };
-
-export type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed';

@@ -92,5 +92,3 @@ class UserService:
             meta={"fingerprint": user.key_fingerprint},
         )
         await self.session.commit()
-        await self.c.hub.disconnect_user(user.id)
-        await chat.flush_notifications()
