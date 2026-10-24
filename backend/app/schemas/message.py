@@ -15,15 +15,23 @@ class MessageOut(CamelModel):
     id: uuid.UUID
     conversation_id: uuid.UUID
     sender_id: uuid.UUID
-    ciphertext: Ciphertext
-    nonce: Nonce
+    ciphertext: Ciphertext | None
+    nonce: Nonce | None
     key_version: int
     created_at: datetime
     expires_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None
 
 
 class MessageCreate(CamelModel):
     id: uuid.UUID
+    ciphertext: Ciphertext
+    nonce: Nonce
+    key_version: int = Field(ge=1)
+
+
+class MessageUpdate(CamelModel):
     ciphertext: Ciphertext
     nonce: Nonce
     key_version: int = Field(ge=1)

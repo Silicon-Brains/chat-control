@@ -27,4 +27,12 @@ describe('voice messages', () => {
       serializeVoiceMessage(new Blob([new Uint8Array(MAX_VOICE_AUDIO_BYTES + 1)], { type: 'audio/webm' }), 1000),
     ).rejects.toThrow('too large');
   });
+
+  it('accepts browser audio MIME types with spaced, quoted codec parameters', async () => {
+    const payload = await serializeVoiceMessage(
+      new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/mp4; codecs="mp4a.40.2"' }),
+      1000,
+    );
+    expect(parseVoiceMessage(payload)?.mimeType).toBe('audio/mp4; codecs="mp4a.40.2"');
+  });
 });

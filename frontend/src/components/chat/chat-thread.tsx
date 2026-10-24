@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { VerifiedMark } from '@/components/ui/verified-mark';
 import { conversationsApi } from '@/lib/api/endpoints';
 import { canPost, conversationTitle } from '@/lib/chat/helpers';
-import { prepareOutgoing, toChatMessage } from '@/lib/chat/pipeline';
+import { prepareOutgoing, prepareOutgoingPayload, toChatMessage } from '@/lib/chat/pipeline';
 import { serializeVoiceMessage } from '@/lib/chat/voice';
 import { MESSAGE_TTL_MS } from '@/lib/constants';
 import { useChatStore } from '@/stores/chat';
@@ -21,8 +21,8 @@ import { MessageBubble } from './message-bubble';
 
 const EMPTY: ChatMessage[] = [];
 
-function encodeMessageCursor(createdAt: string, id: string): string {
-  return btoa(`${createdAt}|${id}`).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+function encodeMessageCursor(updatedAt: string, id: string): string {
+  return btoa(`${updatedAt}|${id}`).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 export function ChatThread({ conversation }: { conversation: Conversation }) {
@@ -41,7 +41,8 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
     const page = await conversationsApi.messages(convId, cur);
     upsert(convId, await Promise.all(page.items.map(toChatMessage)));
     if (cur === null && page.items[0]) {
-      syncCursor.current = encodeMessageCursor(page.items[0].createdAt, page.items[0].id);
+      const latest = page.items.reduce((a, b) => a.updatedAt > b.updatedAt || (a.updatedAt === b.updatedAt && a.id > b.id) ? a : b);
+      syncCursor.current = encodeMessageCursor(latest.updatedAt, latest.id);
     }
     return page.nextCursor;
   }, [convId, upsert]);
@@ -59,7 +60,7 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
       if (!incoming.length) return;
       upsert(convId, await Promise.all(incoming.map(toChatMessage)));
       const latest = incoming[incoming.length - 1]!;
-      syncCursor.current = encodeMessageCursor(latest.createdAt, latest.id);
+      syncCursor.current = encodeMessageCursor(latest.updatedAt, latest.id);
     } finally {
       pollInFlight.current = false;
     }
@@ -124,7 +125,7 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
     const now = Date.now();
     upsert(convId, [{
       id, conversationId: convId, senderId: user.id, keyVersion: conversation.currentKeyVersion,
-      createdAt: new Date(now).toISOString(), expiresAt: new Date(now + MESSAGE_TTL_MS).toISOString(),
+      createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(), expiresAt: new Date(now + MESSAGE_TTL_MS).toISOString(),
       text, status: 'pending',
     }]);
     try {
@@ -135,6 +136,29 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
     } catch (e) {
       useChatStore.getState().markFailed(convId, id);
       toast.error(e instanceof Error ? e.message : 'Message not sent.');
+      return false;
+    }
+  }
+
+  async function editMessage(message: ChatMessage, text: string): Promise<boolean> {
+    try {
+      const outgoing = await prepareOutgoingPayload(conversation, user.id, text);
+      const saved = await conversationsApi.editMessage(convId, message.id, outgoing);
+      upsert(convId, [await toChatMessage(saved)]);
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Message could not be edited.');
+      return false;
+    }
+  }
+
+  async function deleteMessage(message: ChatMessage): Promise<boolean> {
+    try {
+      const saved = await conversationsApi.deleteMessage(convId, message.id);
+      upsert(convId, [await toChatMessage(saved)]);
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Message could not be deleted.');
       return false;
     }
   }
@@ -195,6 +219,8 @@ export function ChatThread({ conversation }: { conversation: Conversation }) {
                     mine={m.senderId === user.id}
                     senderName={showNames ? names.get(m.senderId) : undefined}
                     senderVerified={verifiedMembers.has(m.senderId)}
+                    onEdit={(text) => editMessage(m, text)}
+                    onDelete={() => deleteMessage(m)}
                   />
                 ))}
               </ul>

@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import delete, func, select, tuple_
+from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,16 +18,19 @@ class StoredMessage:
     id: uuid.UUID
     conversation_id: uuid.UUID
     sender_id: uuid.UUID
-    ciphertext: bytes
-    nonce: bytes
+    ciphertext: bytes | None
+    nonce: bytes | None
     key_version: int
     created_at: datetime
     expires_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None
 
     @classmethod
     def from_row(cls, m: Message) -> StoredMessage:
         return cls(
-            m.id, m.conversation_id, m.sender_id, m.ciphertext, m.nonce, m.key_version, m.created_at, m.expires_at
+            m.id, m.conversation_id, m.sender_id, m.ciphertext, m.nonce, m.key_version,
+            m.created_at, m.expires_at, m.updated_at, m.deleted_at
         )
 
 
@@ -60,12 +63,12 @@ class MessageRepository:
                 key_version=key_version,
             )
             .on_conflict_do_nothing(index_elements=[Message.id])
-            .returning(Message.created_at, Message.expires_at)
+            .returning(Message.created_at, Message.expires_at, Message.updated_at)
         )
         row = (await self.session.execute(stmt)).one_or_none()
         if row is None:
             return None
-        return StoredMessage(message_id, conversation_id, sender_id, ciphertext, nonce, key_version, row[0], row[1])
+        return StoredMessage(message_id, conversation_id, sender_id, ciphertext, nonce, key_version, row[0], row[1], row[2], None)
 
     async def get(self, message_id: uuid.UUID) -> StoredMessage | None:
         row = (await self.session.execute(select(Message).where(Message.id == message_id))).scalar_one_or_none()
@@ -96,12 +99,50 @@ class MessageRepository:
         after: tuple[datetime, uuid.UUID] | None,
         limit: int,
     ) -> list[Message]:
-        """Return only newer, live messages in ascending order for efficient polling."""
+        """Return created or changed live messages in update order for polling."""
         stmt = select(Message).where(Message.conversation_id == conversation_id, Message.expires_at > func.now())
         if after:
-            stmt = stmt.where(tuple_(Message.created_at, Message.id) > tuple_(after[0], after[1]))
-        stmt = stmt.order_by(Message.created_at, Message.id).limit(limit)
+            stmt = stmt.where(tuple_(Message.updated_at, Message.id) > tuple_(after[0], after[1]))
+        stmt = stmt.order_by(Message.updated_at, Message.id).limit(limit)
         return list((await self.session.execute(stmt)).scalars())
+
+    async def get_for_update(self, message_id: uuid.UUID) -> Message | None:
+        stmt = select(Message).where(Message.id == message_id).with_for_update()
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def update_owned(
+        self, message: Message, *, user_id: uuid.UUID, ciphertext: bytes, nonce: bytes, key_version: int
+    ) -> Message | None:
+        stmt = (
+            update(Message)
+            .where(
+                Message.id == message.id,
+                Message.sender_id == user_id,
+                Message.deleted_at.is_(None),
+                Message.conversation_id == message.conversation_id,
+                Message.expires_at > func.now(),
+            )
+            .values(ciphertext=ciphertext, nonce=nonce, key_version=key_version, updated_at=func.now())
+            .returning(Message)
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def delete_owned(self, message: Message, *, user_id: uuid.UUID) -> Message | None:
+        stmt = (
+            update(Message)
+            .where(
+                Message.id == message.id,
+                Message.sender_id == user_id,
+                Message.deleted_at.is_(None),
+                Message.conversation_id == message.conversation_id,
+                Message.expires_at > func.now(),
+            )
+            .values(ciphertext=None, nonce=None, deleted_at=func.now(), updated_at=func.now())
+            .returning(Message)
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def delete_expired_batch(self, limit: int) -> list[tuple[uuid.UUID, uuid.UUID]]:
         victims = (

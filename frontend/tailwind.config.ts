@@ -7,7 +7,11 @@ const config: Config = {
     extend: {
       colors: {
         primary: { 300: '#8FBFBF', 500: '#3E8C8F', 600: '#2F7378' },
-        ink: { 400: '#8A9A99', 600: '#5A6B6A', 900: '#1E2B2A' },
+        ink: {
+          400: 'var(--color-ink-400, #8A9A99)',
+          600: 'var(--color-ink-600, #5A6B6A)',
+          900: 'var(--color-ink-900, #1E2B2A)',
+        },
         mint: '#CFE3E1',
         sky: '#BED3DB',
         lavender: '#C7C2EA',

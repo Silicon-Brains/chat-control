@@ -89,14 +89,16 @@ export interface EncryptedMessage {
   id: string;
   conversationId: string;
   senderId: string;
-  ciphertext: string;
-  nonce: string;
+  ciphertext: string | null;
+  nonce: string | null;
   keyVersion: number;
   createdAt: string;
   expiresAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
 }
 
-export type MessageStatus = 'ok' | 'pending' | 'failed' | 'undecryptable';
+export type MessageStatus = 'ok' | 'pending' | 'failed' | 'undecryptable' | 'deleted';
 
 export interface ChatMessage {
   id: string;
@@ -105,6 +107,7 @@ export interface ChatMessage {
   keyVersion: number;
   createdAt: string;
   expiresAt: string;
+  updatedAt: string;
   text: string | null;
   status: MessageStatus;
 }

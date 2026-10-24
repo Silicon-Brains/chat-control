@@ -2,6 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Topbar } from '@/components/layout/topbar';
+import { ThemeToggle } from '@/components/layout/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { CardHeader, GlassCard } from '@/components/ui/glass-card';
 import { Modal } from '@/components/ui/modal';
@@ -25,6 +26,11 @@ export default function SettingsPage() {
     <>
       <Topbar title="Settings" greeting="Your account and device" />
       <div className="grid max-w-3xl gap-5">
+        <GlassCard>
+          <CardHeader title="Appearance" />
+          <p className="mb-4 text-sm">Choose a theme for this device. Your preference is saved in this browser.</p>
+          <ThemeToggle />
+        </GlassCard>
         <GlassCard>
           <CardHeader title="Profile" />
           <dl className="grid grid-cols-[8rem_1fr] gap-y-2 text-sm">

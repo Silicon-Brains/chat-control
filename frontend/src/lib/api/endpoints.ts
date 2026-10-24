@@ -59,6 +59,10 @@ export const conversationsApi = {
   markRead: (id: string) => api(`/conversations/${id}/read`, { method: 'POST' }),
   sendMessage: (id: string, body: { id: string; ciphertext: string; nonce: string; keyVersion: number }) =>
     api<EncryptedMessage>(`/conversations/${id}/messages`, { method: 'POST', body }),
+  editMessage: (id: string, messageId: string, body: { ciphertext: string; nonce: string; keyVersion: number }) =>
+    api<EncryptedMessage>(`/conversations/${id}/messages/${messageId}`, { method: 'PUT', body }),
+  deleteMessage: (id: string, messageId: string) =>
+    api<EncryptedMessage>(`/conversations/${id}/messages/${messageId}`, { method: 'DELETE' }),
 };
 
 export interface CreatedUser {

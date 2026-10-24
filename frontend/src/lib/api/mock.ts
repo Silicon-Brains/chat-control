@@ -213,12 +213,36 @@ export async function mockRequest<T>(
       const msg: EncryptedMessage = {
         id: String(body.id), conversationId: c!.id, senderId: me.id, ciphertext: String(body.ciphertext),
         nonce: String(body.nonce), keyVersion: Number(body.keyVersion), createdAt: new Date(now).toISOString(),
+        updatedAt: new Date(now).toISOString(), deletedAt: null,
         expiresAt: new Date(now + MESSAGE_TTL_MS).toISOString(),
       };
       c!.messages.push(msg);
       return out(msg);
     }
     return out({ items: [...c!.messages].reverse(), nextCursor: null });
+  }
+  if ((method === 'PUT' || method === 'DELETE') && (m = path.match(/^\/conversations\/([^/]+)\/messages\/([^/]+)$/))) {
+    const me = requireUser();
+    const c = convs.find((x) => x.id === m![1]);
+    if (!c?.members.some((x) => x.userId === me.id)) fail(404, 'NOT_FOUND', 'Not found');
+    const msg = c!.messages.find((x) => x.id === m![2]);
+    if (!msg) fail(404, 'MESSAGE_NOT_FOUND', 'Message not found');
+    if (msg!.senderId !== me.id) fail(403, 'NOT_MESSAGE_SENDER', 'You can only change your own messages');
+    if (msg!.deletedAt) fail(409, 'MESSAGE_NOT_EDITABLE', 'This message was deleted');
+    if (method === 'PUT') {
+      msg!.ciphertext = String(body.ciphertext);
+      msg!.nonce = String(body.nonce);
+      msg!.keyVersion = Number(body.keyVersion);
+      msg!.updatedAt = new Date().toISOString();
+      return out(msg);
+    }
+    if (method === 'DELETE') {
+      msg!.ciphertext = null;
+      msg!.nonce = null;
+      msg!.deletedAt = new Date().toISOString();
+      msg!.updatedAt = msg!.deletedAt;
+      return out(msg);
+    }
   }
   if ((m = path.match(/^\/conversations\/([^/]+)\/messages\/updates$/))) {
     const me = requireUser();
@@ -230,10 +254,10 @@ export async function mockRequest<T>(
     const [timestamp, id] = atob(encoded + '='.repeat((4 - encoded.length % 4) % 4)).split('|');
     const cursorAt = Date.parse(timestamp ?? '');
     return out(c!.messages.filter((message) => {
-      const messageAt = Date.parse(message.createdAt);
+      const messageAt = Date.parse(message.updatedAt);
       return new Date(message.expiresAt).getTime() > Date.now()
         && (messageAt > cursorAt || (messageAt === cursorAt && message.id > id!));
-    }).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).slice(0, 100));
+    }).sort((a, b) => a.updatedAt.localeCompare(b.updatedAt) || a.id.localeCompare(b.id)).slice(0, 100));
   }
   if (/^\/conversations\/[^/]+\/read$/.test(path)) return out();
 

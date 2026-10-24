@@ -18,7 +18,7 @@ from app.schemas.conversation import (
     RotateKeyRequest,
     UpdateGroupRequest,
 )
-from app.schemas.message import MessageCreate, MessageOut, MessagePage
+from app.schemas.message import MessageCreate, MessageOut, MessagePage, MessageUpdate
 from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -166,3 +166,35 @@ async def send_message(
         client_id=body.id,
     )
     return MessageOut.model_validate(result.message)
+
+
+@router.put("/{conversation_id}/messages/{message_id}", response_model=MessageOut)
+async def edit_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    body: MessageUpdate,
+    user: CurrentUser,
+    session: SessionDep,
+    container: ContainerDep,
+) -> MessageOut:
+    result = await ChatService(session, container).edit_message(
+        user,
+        conversation_id,
+        message_id,
+        ciphertext=body.ciphertext,
+        nonce=body.nonce,
+        key_version=body.key_version,
+    )
+    return MessageOut.model_validate(result)
+
+
+@router.delete("/{conversation_id}/messages/{message_id}", response_model=MessageOut)
+async def delete_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    container: ContainerDep,
+) -> MessageOut:
+    result = await ChatService(session, container).delete_message(user, conversation_id, message_id)
+    return MessageOut.model_validate(result)

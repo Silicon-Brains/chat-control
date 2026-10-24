@@ -32,7 +32,10 @@ export function parseVoiceMessage(value: string | null): VoicePayload | null {
     !Number.isInteger(durationMs) ||
     durationMs < 1 ||
     durationMs > MAX_VOICE_DURATION_SECONDS * 1000 ||
-    !/^audio\/[a-z0-9.+-]+(?:;[a-z0-9._+-]+=[a-z0-9._+-]+)*$/i.test(mimeType) ||
+    // MediaRecorder MIME strings may contain whitespace and quoted codec values
+    // (for example: audio/mp4; codecs="mp4a.40.2"). Keep the subtype and
+    // parameter syntax constrained, but accept valid browser variations.
+    !/^audio\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*[a-z0-9!#$&^_.+-]+\s*=\s*(?:[a-z0-9!#$&^_.+-]+|"[^"\r\n]*"))*$/i.test(mimeType) ||
     data.length === 0 ||
     data.length > Math.ceil(MAX_VOICE_AUDIO_BYTES / 3) * 4 ||
     !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)

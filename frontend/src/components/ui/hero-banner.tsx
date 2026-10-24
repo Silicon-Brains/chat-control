@@ -7,7 +7,7 @@ export function HeroBanner({ title, body, href, cta }: { title: string; body: st
       <div className="relative z-10 max-w-sm">
         <h2 className="text-2xl font-bold !text-white">{title}</h2>
         <p className="mt-2 text-white/85">{body}</p>
-        <Link href={href} className="mt-6 inline-flex h-11 items-center rounded-full bg-white px-6 font-semibold text-primary-600 transition hover:shadow-lift">
+        <Link href={href} className="hero-banner-cta mt-6 inline-flex h-11 items-center rounded-full bg-[#F4FAF9] px-6 font-semibold text-[#245E61] transition hover:shadow-lift">
           {cta}
         </Link>
       </div>

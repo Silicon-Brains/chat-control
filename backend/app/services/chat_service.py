@@ -240,6 +240,39 @@ class ChatService:
         await self._require_member(cid, user)
         return await self.msgs.updates(cid, after=decode_cursor(after) if after else None, limit=limit)
 
+    async def edit_message(self, user: User, cid: uuid.UUID, mid: uuid.UUID, *, ciphertext: bytes, nonce: bytes, key_version: int) -> Message:
+        conv = await self._locked_conversation(cid, user)
+        self._check_version(conv, key_version)
+        message = await self.msgs.get_for_update(mid)
+        if message is None or message.conversation_id != cid:
+            raise NotFound("Message not found", code="MESSAGE_NOT_FOUND")
+        if message.sender_id != user.id:
+            raise Forbidden("You can only edit your own messages", code="NOT_MESSAGE_SENDER")
+        if message.deleted_at is not None:
+            raise Conflict("This message can no longer be edited", code="MESSAGE_NOT_EDITABLE")
+        updated = await self.msgs.update_owned(message, user_id=user.id, ciphertext=ciphertext, nonce=nonce, key_version=key_version)
+        if updated is None:
+            raise Conflict("This message can no longer be edited", code="MESSAGE_NOT_EDITABLE")
+        self.audit.add("message.edit", actor_id=user.id, target_id=mid)
+        await self.session.commit()
+        return updated
+
+    async def delete_message(self, user: User, cid: uuid.UUID, mid: uuid.UUID) -> Message:
+        await self._locked_conversation(cid, user)
+        message = await self.msgs.get_for_update(mid)
+        if message is None or message.conversation_id != cid:
+            raise NotFound("Message not found", code="MESSAGE_NOT_FOUND")
+        if message.sender_id != user.id:
+            raise Forbidden("You can only delete your own messages", code="NOT_MESSAGE_SENDER")
+        if message.deleted_at is not None:
+            raise Conflict("This message can no longer be deleted", code="MESSAGE_NOT_DELETABLE")
+        deleted = await self.msgs.delete_owned(message, user_id=user.id)
+        if deleted is None:
+            raise Conflict("This message can no longer be deleted", code="MESSAGE_NOT_DELETABLE")
+        self.audit.add("message.delete", actor_id=user.id, target_id=mid)
+        await self.session.commit()
+        return deleted
+
     async def mark_read(self, user: User, cid: uuid.UUID) -> None:
         await self.mark_read_for_user(user.id, cid)
 

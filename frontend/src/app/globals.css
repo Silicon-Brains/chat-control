@@ -16,6 +16,43 @@
   :focus-visible { @apply outline-none ring-2 ring-primary-500 ring-offset-2 ring-offset-transparent; }
 }
 
+html.dark {
+  color-scheme: dark;
+  --color-ink-400: #A6B8B7;
+  --color-ink-600: #D0DDDC;
+  --color-ink-900: #F4F8F8;
+}
+html.dark body {
+  color: #D0DDDC;
+  background:
+    radial-gradient(60% 50% at 10% 0%, #334444 0%, transparent 60%),
+    radial-gradient(50% 60% at 100% 40%, #35344A 0%, transparent 60%),
+    linear-gradient(135deg, #172525 0%, #202C37 100%);
+}
+html.dark .text-ink-400 { color: #A6B8B7; }
+html.dark .text-ink-600 { color: #D0DDDC; }
+html.dark .text-ink-900,
+html.dark h1, html.dark h2, html.dark h3 { color: #F4F8F8; }
+html.dark .glass {
+  border-color: rgb(255 255 255 / 12%);
+  background-color: rgb(17 27 32 / 68%);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 22%), inset 0 1px 0 rgb(255 255 255 / 8%);
+}
+html.dark .hero-banner-cta {
+  background-color: #EAF4F2;
+  color: #173F42;
+}
+html.dark .hero-banner-cta:hover { background-color: #FFFFFF; }
+html.dark [class*="bg-white"] { background-color: rgb(255 255 255 / 10%); }
+html.dark [class*="border-white"] { border-color: rgb(255 255 255 / 14%); }
+html.dark [class*="border-black/5"] { border-color: rgb(255 255 255 / 10%); }
+html.dark input, html.dark textarea, html.dark select {
+  color: #F4F8F8;
+  background-color: rgb(255 255 255 / 8%);
+  border-color: rgb(255 255 255 / 16%);
+}
+html.dark input::placeholder, html.dark textarea::placeholder { color: #A6B8B7; }
+
 @layer components {
   .glass {
     @apply rounded-card border border-white/70 bg-white/[0.45] shadow-glass;
