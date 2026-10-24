@@ -200,7 +200,11 @@ export default function LandingPage() {
 
       <footer className="mx-auto flex max-w-content flex-col gap-2 border-t border-white/50 px-4 py-6 text-sm text-ink-600 sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-12">
         <p>© {new Date().getFullYear()} VaultChat</p>
-        <p>Private conversations, by design.</p>
+        <nav aria-label="Company and legal" className="flex flex-wrap gap-x-5 gap-y-2">
+          <Link href="/about" className="hover:text-primary-600">About</Link>
+          <Link href="/privacy" className="hover:text-primary-600">Privacy policy</Link>
+          <Link href="/terms" className="hover:text-primary-600">Terms of use</Link>
+        </nav>
       </footer>
     </main>
   );
